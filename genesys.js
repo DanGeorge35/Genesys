@@ -3,9 +3,9 @@
 /* eslint-disable comma-dangle */
 const fs = require("fs");
 const DbHelper = require("./dbhandler");
+require("dotenv").config();
 
 const GenDir = "PROJECT";
-
 class Genesys {
   static async GetTables() {
     const tables = Array();
@@ -75,12 +75,13 @@ class Genesys {
     const fileDir = `${__dirname}/${GenDir}/model`;
     if (tableName === "") {
       const tables = await this.GetTables();
-      const fields = await this.GetFields(tables[0]);
-
-      const result = await this.setTableModel(tables[0], fields);
-      const tbname = tables[0].toLowerCase();
-      const wstream = fs.createWriteStream(`${fileDir}/${tbname}.model.js`);
-      wstream.write(result);
+      for (let i = 0; i < tables.length; i++) {
+        const fields = await this.GetFields(tables[i]);
+        const result = await this.setTableModel(tables[i], fields);
+        const tbname = tables[i].toLowerCase();
+        const wstream = fs.createWriteStream(`${fileDir}/${tbname}.model.js`);
+        wstream.write(result);
+      }
     }
   }
 
@@ -355,6 +356,25 @@ class ${TableName}Handler {
 
 module.exports = ${TableName}Handler;
 `);
+
+    fileDir = `${__dirname}/${GenDir}/services/`;
+
+    const tables = await this.GetTables();
+    wstream = fs.createWriteStream(`${fileDir}/index.js`);
+    let content = "";
+    for (let i = 0; i < tables.length; i++) {
+      tableName = tables[i];
+      const tbname = tableName.toLowerCase();
+      content += `const ${tbname}Endpoint = require("./${tbname}/${tbname}.endpoint");\n`;
+    }
+    content += "module.exports = [\n";
+    for (let i = 0; i < tables.length; i++) {
+      tableName = tables[i];
+      const tbname = tableName.toLowerCase();
+      content += `  ...${tbname}Endpoint,`;
+    }
+    content += "];\n";
+    wstream.write(content);
     wstream.end();
   }
 
@@ -897,6 +917,122 @@ module.exports = dbhelper;
 `
     );
     wstream.end();
+  }
+
+  static async createStatic() {
+    const fileDir = `${__dirname}/${GenDir}/`;
+    let wstream = fs.createWriteStream(`${fileDir}/package.json`);
+    wstream.write(`{
+  "name": "${process.env.PROJECT}",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": [
+    "${process.env.PROJECT}"
+  ],
+  "author": "Dan George",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.2.2",
+    "bcrypt": "^5.1.0",
+    "body-parser": "^1.19.2",
+    "chalk": "^5.2.0",
+    "date-and-time": "^2.3.1",
+    "dotenv": "^16.0.1",
+    "ejs": "^3.1.7",
+    "express": "^4.18.1",
+    "express-mysql-session": "^2.1.7",
+    "express-sesssion": "^1.15.5",
+    "jsonwebtoken": "^8.5.1",
+    "multer": "^1.4.5-lts.1",
+    "mysql": "^2.18.1",
+    "nodemailer": "^6.7.3",
+    "nodemailer-smtp-transport": "^2.7.4",
+    "nodemon": "^2.0.16",
+    "socket.io": "^4.1.2",
+    "sql-escape": "^1.0.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.31.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-plugin-import": "^2.26.0"
+  }
+}
+`);
+
+    let envContent = fs.readFileSync(__dirname + "/.env");
+    wstream = fs.createWriteStream(`${fileDir}/.env`);
+    wstream.write(envContent.toString());
+
+    let configContent = fs.readFileSync(__dirname + "/config.js");
+    wstream = fs.createWriteStream(`${fileDir}/config/config.js`);
+    wstream.write(configContent.toString());
+
+    wstream = fs.createWriteStream(`${fileDir}/index.js`);
+    wstream.write(`/* eslint-disable no-console */
+/* eslint-disable comma-dangle */
+/* eslint-disable consistent-return */
+const express = require("express");
+
+const dotenv = require("dotenv");
+
+const app = express();
+const bodyParser = require("body-parser");
+
+dotenv.config();
+
+const endpoints = require("./services");
+const RouteHelper = require("./helpers/route.helper");
+
+app.use(express.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+const bodyParseroptions = {
+  inflate: true,
+  limit: "100kb",
+  type: "application/octet-stream",
+};
+
+app.use(bodyParser.raw(bodyParseroptions));
+
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
+  );
+
+  if (req.method === "OPTIONS") {
+    res.header("Access-Control-Allow-Methods", "PUT, POST, PATCH, DELETE, GET");
+    return res.status(200).json({});
+  }
+
+  next();
+});
+
+/* API Endpoints  */
+try {
+  RouteHelper.applyRoutes(endpoints, app);
+} catch (error) {
+  console.log(error);
+}
+
+const port = process.env.PORT;
+
+app.listen(port, () => {
+  console.log(\`Socket.IO server running at http://localhost:\${port}/\`);
+});
+`);
+  }
+
+  static async createProject() {
+    this.createHelpers();
+    this.createModel();
+    this.createService();
+    this.createStatic();
   }
 }
 

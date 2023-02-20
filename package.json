@@ -1,5 +1,5 @@
 {
-  "name": "koboWeb",
+  "name": "GeneSys",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -7,7 +7,7 @@
     "dev": "nodemon index.js"
   },
   "keywords": [
-    "KoboWeb"
+    "GeneSys"
   ],
   "author": "Dan George",
   "license": "ISC",
