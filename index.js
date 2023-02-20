@@ -2,9 +2,12 @@
 /* eslint-disable comma-dangle */
 /* eslint-disable consistent-return */
 const express = require("express");
+
+const fs = require("fs");
+
 const app = express();
 
-const { Genesis } = require("./genesys");
+const { Genesys } = require("./genesys");
 
 const port = 1001;
 
@@ -16,7 +19,7 @@ if (!fs.existsSync(GenDir)) {
     if (!fs.existsSync(fileDir)) {
       fs.mkdir(fileDir, { recursive: true }, (err) => {
         if (err) throw err;
-        fileDir = `${__dirname}/${GenDir}/services/${tbname}`;
+        fileDir = `${__dirname}/${GenDir}/services/`;
         if (!fs.existsSync(fileDir)) {
           fs.mkdir(fileDir, { recursive: true }, (err) => {
             if (err) throw err;
@@ -28,6 +31,7 @@ if (!fs.existsSync(GenDir)) {
                 if (!fs.existsSync(fileDir)) {
                   fs.mkdir(fileDir, { recursive: true }, (err) => {
                     if (err) throw err;
+                    Genesys.createProject();
                   });
                 }
               });
@@ -38,8 +42,6 @@ if (!fs.existsSync(GenDir)) {
     }
   });
 }
-
-Genesis.createProject();
 
 app.listen(port, () => {
   console.log(`Socket.IO server running at http://localhost:${port}/`);

@@ -12,7 +12,7 @@ class Genesys {
     console.log(DbHelper.connection);
     const results = await DbHelper.runQuery("SHOW TABLES");
     for (let i = 0; i < results.length; i++) {
-      tables.push(results[i].Tables_in_kobodbtest);
+      tables.push(results[i]["Tables_in_" + process.env.DB.toLowerCase()]);
     }
     return tables;
   }
@@ -71,33 +71,22 @@ class Genesys {
     return model;
   }
 
-  static async createModel(tableName = "") {
-    const fileDir = `${__dirname}/${GenDir}/model`;
-    if (tableName === "") {
-      const tables = await this.GetTables();
-      for (let i = 0; i < tables.length; i++) {
-        const fields = await this.GetFields(tables[i]);
-        const result = await this.setTableModel(tables[i], fields);
-        const tbname = tables[i].toLowerCase();
-        const wstream = fs.createWriteStream(`${fileDir}/${tbname}.model.js`);
-        wstream.write(result);
-      }
-    }
-  }
-
-  static async createService(tableName) {
+  static async setService(tableName) {
     const tbname = tableName.toLowerCase();
     const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
     const fileDir = `${__dirname}/${GenDir}/services/${tbname}`;
 
-    /*
+    if (!fs.existsSync(fileDir)) {
+      fs.mkdir(fileDir, { recursive: true }, (err) => {
+        if (err) throw err;
+        /*
         .
         .
          ---------------------------------------------------------Endpoints
         */
-    let wstream = fs.createWriteStream(`${fileDir}/${tbname}.endpoint.js`);
-    wstream.write(
-      `const ${tbname}Controller = require("./${tbname}.controller");
+        let wstream = fs.createWriteStream(`${fileDir}/${tbname}.endpoint.js`);
+        wstream.write(
+          `const ${tbname}Controller = require("./${tbname}.controller");
 const appFunctions = require("../../helpers/app.helper");
 
 const ENDPOINT_URL = "/api/${tbname}";
@@ -144,17 +133,17 @@ const ${tbname}Endpoint = [
 ];
 module.exports = ${tbname}Endpoint;
 `
-    );
-    wstream.end();
+        );
+        wstream.end();
 
-    /*
+        /*
         .
         .
          ---------------------------------------------------------Controller
         */
-    wstream = fs.createWriteStream(`${fileDir}/${tbname}.controller.js`);
-    wstream.write(
-      `/* eslint-disable no-console */
+        wstream = fs.createWriteStream(`${fileDir}/${tbname}.controller.js`);
+        wstream.write(
+          `/* eslint-disable no-console */
 /* eslint-disable consistent-return */
 
 const ${tbname}Handler = require("./${tbname}.handler");
@@ -238,16 +227,16 @@ class ${tbname}Controller {
 }
 module.exports = ${tbname}Controller;
 `
-    );
-    wstream.end();
+        );
+        wstream.end();
 
-    /*
+        /*
         .
         .
          ---------------------------------------------------------Handler
         */
-    wstream = fs.createWriteStream(`${fileDir}/${tbname}.handler.js`);
-    wstream.write(`/* eslint-disable no-param-reassign */
+        wstream = fs.createWriteStream(`${fileDir}/${tbname}.handler.js`);
+        wstream.write(`/* eslint-disable no-param-reassign */
 /* eslint-disable comma-dangle */
 const DbHelper = require("../../helpers/db.helper");
 const ${TableName}Model = require("../../models/${tbname}.model");
@@ -356,20 +345,44 @@ class ${TableName}Handler {
 
 module.exports = ${TableName}Handler;
 `);
+      });
+    }
+  }
 
-    fileDir = `${__dirname}/${GenDir}/services/`;
+  static async createModel(tableName = "") {
+    const fileDir = `${__dirname}/${GenDir}/model`;
+    if (tableName === "") {
+      const tables = await this.GetTables();
+      for (let i = 0; i < tables.length; i++) {
+        const fields = await this.GetFields(tables[i]);
+        const result = await this.setTableModel(tables[i], fields);
+        const tbname = tables[i].toLowerCase();
+        const wstream = fs.createWriteStream(`${fileDir}/${tbname}.model.js`);
+        wstream.write(result);
+      }
+    }
+  }
+
+  static async createService() {
+    const fileDir = `${__dirname}/${GenDir}/services/`;
 
     const tables = await this.GetTables();
-    wstream = fs.createWriteStream(`${fileDir}/index.js`);
+
+    for (let i = 0; i < tables.length; i++) {
+      const tableName = tables[i];
+      this.setService(tableName);
+    }
+
+    const wstream = fs.createWriteStream(`${fileDir}/index.js`);
     let content = "";
     for (let i = 0; i < tables.length; i++) {
-      tableName = tables[i];
+      let tableName = tables[i];
       const tbname = tableName.toLowerCase();
       content += `const ${tbname}Endpoint = require("./${tbname}/${tbname}.endpoint");\n`;
     }
     content += "module.exports = [\n";
     for (let i = 0; i < tables.length; i++) {
-      tableName = tables[i];
+      let tableName = tables[i];
       const tbname = tableName.toLowerCase();
       content += `  ...${tbname}Endpoint,`;
     }
@@ -379,7 +392,7 @@ module.exports = ${TableName}Handler;
   }
 
   static async createHelpers() {
-    const fileDir = `${__dirname}/${GenDir}/helpers/`;
+    const fileDir = `${__dirname}/${GenDir}/helpers`;
 
     /*
         .
@@ -962,14 +975,17 @@ module.exports = dbhelper;
   }
 }
 `);
+    wstream.end();
 
     let envContent = fs.readFileSync(__dirname + "/.env");
     wstream = fs.createWriteStream(`${fileDir}/.env`);
     wstream.write(envContent.toString());
+    wstream.end();
 
     let configContent = fs.readFileSync(__dirname + "/config.js");
     wstream = fs.createWriteStream(`${fileDir}/config/config.js`);
     wstream.write(configContent.toString());
+    wstream.end();
 
     wstream = fs.createWriteStream(`${fileDir}/index.js`);
     wstream.write(`/* eslint-disable no-console */
@@ -1026,6 +1042,7 @@ app.listen(port, () => {
   console.log(\`Socket.IO server running at http://localhost:\${port}/\`);
 });
 `);
+    wstream.end();
   }
 
   static async createProject() {
