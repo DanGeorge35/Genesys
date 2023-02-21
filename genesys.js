@@ -9,7 +9,6 @@ const GenDir = "PROJECT";
 class Genesys {
   static async GetTables() {
     const tables = Array();
-    console.log(DbHelper.connection);
     const results = await DbHelper.runQuery("SHOW TABLES");
     for (let i = 0; i < results.length; i++) {
       tables.push(results[i]["Tables_in_" + process.env.DB.toLowerCase()]);
@@ -33,16 +32,16 @@ class Genesys {
   static async setTableModel(tableName, fields) {
     const tbname = tableName.toLowerCase();
     const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
-    let model = `class ${TableName} {\n`;
+    let model = `const escape = require('sql-escape');\n\n class ${TableName} {\n`;
     for (let i = 0; i < fields.name.length; i++) {
       model += `  ${fields.name[i]};\n\n`;
     }
     model += "  constructor(body) {\n";
     for (let i = 0; i < fields.name.length; i++) {
       if (fields.required[i] === "YES") {
-        model += `    this.${fields.name[i]} = body.${fields.name[i]} || "";\n`;
+        model += `    this.${fields.name[i]} = escape(body.${fields.name[i]}) || "";\n`;
       } else {
-        model += `    this.${fields.name[i]} = body.${fields.name[i]};\n`;
+        model += `    this.${fields.name[i]} = escape(body.${fields.name[i]});\n`;
       }
     }
     model += "  }\n\n";
@@ -814,7 +813,7 @@ class dbhelper {
               JSON.parse(JSON.stringify(results))
             ); // --- Remove RowDataPacket
             connection.query(
-              \`SELECT COUNT(*) AS dcount FROM \${table} WHERE \${whereArray} ORDER BY id DESC LIMIT  \${start} , \${limit}\`,
+              \`SELECT COUNT(*) AS dcount FROM \${table} WHERE \${whereArray} ORDER BY id\`,
               equals,
               (_derror, dresults) => {
                 const dtotal = Object.values(
