@@ -32,16 +32,28 @@ class Genesys {
   static async setTableModel(tableName, fields) {
     const tbname = tableName.toLowerCase();
     const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
-    let model = `const escape = require('sql-escape');\n\n class ${TableName} {\n`;
+    let model = `const escape = require('sql-escape');\n\nconst appFunctions = require("../helpers/app.helper");\n\n
+    function MakeEscape(ddata) {
+      if (ddata !== undefined) {
+        return escape(ddata);
+      }
+      return "";
+    }\n\nclass ${TableName} {\n`;
     for (let i = 0; i < fields.name.length; i++) {
       model += `  ${fields.name[i]};\n\n`;
     }
     model += "  constructor(body) {\n";
     for (let i = 0; i < fields.name.length; i++) {
-      if (fields.required[i] === "YES") {
-        model += `    this.${fields.name[i]} = escape(body.${fields.name[i]}) || "";\n`;
+      if (fields.name[i] === "UpdatedAT") {
+        model += `    this.${fields.name[i]} = appFunctions.humanTime(new Date());\n`;
+      } else if (fields.name[i] === "CreatedAT") {
+        model += `    this.${fields.name[i]} = appFunctions.humanTime(new Date());\n`;
       } else {
-        model += `    this.${fields.name[i]} = escape(body.${fields.name[i]});\n`;
+        if (fields.required[i] === "YES") {
+          model += `    this.${fields.name[i]} = MakeEscape(body.${fields.name[i]}) || "";\n`;
+        } else {
+          model += `    this.${fields.name[i]} = MakeEscape(body.${fields.name[i]});\n`;
+        }
       }
     }
     model += "  }\n\n";
