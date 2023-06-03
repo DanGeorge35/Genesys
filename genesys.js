@@ -67,7 +67,10 @@ class Genesys {
       }
     }
 
-    model += "`;\n    return sql;\n";
+  
+    model += "`;\n    const newSql = sql.replace(/\"null\"/g, \"NULL\");\n";
+
+    model += "`    return newsql;\n";
 
     model += `  }\n}\n\nmodule.exports = ${TableName};\n`;
 
@@ -257,7 +260,7 @@ class ${TableName}Handler {
   }
 
   static async getSingle${TableName}(id) {
-    const ${tbname} = await DbHelper.find("${tableName}", id, ["uid"]);
+    const ${tbname} = await DbHelper.find("${tableName}", id, ["id"]);
     if (${tbname} === "") {
       return { message: "${TableName}  Not Found!", code: 400 };
     }
@@ -281,25 +284,11 @@ class ${TableName}Handler {
 
   static async create${TableName}(data) {
     // eslint-disable-next-line no-param-reassign
-    data.uid = appFunctions.uid();
     const ${tbname} = new ${TableName}Model(data);
     const result = await DbHelper.execute(${tbname}.model());
-    let rs = await this.getSingle${TableName}(data.uid);
-    const newID = 100000 * parseInt(rs.data.id, 10);
-    await DbHelper.update(
-      "${tableName}",
-      "uid",
-      newID,
-      ["uid"],
-      data.uid
-    );
-
-    rs = await this.getSingle${TableName}(newID);
-    return {
-      message: result,
-      code: 200,
-      data: rs.data,
-    };
+    const rs = await DbHelper.find("${tbname}", result.id, ["id"]);
+    result.data = rs;
+    return result;
   }
 
   static async update${TableName}(data) {
@@ -307,7 +296,7 @@ class ${TableName}Handler {
     const ${tbname} = await DbHelper.find(
       "${tableName}",
       [data.id],
-      ["uid"]
+      ["id"]
     );
 
     if (${tbname} === "") {
@@ -321,7 +310,7 @@ class ${TableName}Handler {
             "${tableName}",
             key,
             value,
-            ["uid"],
+            ["id"],
             data.id
           );
         }
@@ -331,7 +320,7 @@ class ${TableName}Handler {
             "${tableName}",
             "UpdatedAT",
             appFunctions.humanTime(new Date()),
-            ["uid"],
+            ["id"],
             data.id
           );
         }
@@ -353,7 +342,7 @@ module.exports = ${TableName}Handler;
   }
 
   static async createModel(tableName = "") {
-    const fileDir = `${__dirname}/${GenDir}/model`;
+    const fileDir = `${__dirname}/${GenDir}/models`;
     if (tableName === "") {
       const tables = await this.GetTables();
       for (let i = 0; i < tables.length; i++) {
@@ -416,7 +405,6 @@ const bcrypt = require("bcrypt");
 
 const dotenv = require("dotenv");
 
-const NotificationModel = require("../models/notification.model");
 
 dotenv.config();
 
@@ -549,10 +537,7 @@ function sqlOptions(options) {
   return str;
 }
 
-function CreateNotification(data) {
-  const noti = new NotificationModel(data);
-  return noti.model();
-}
+
 
 async function SendMail(templateID, templateParams) {
   const options = {
@@ -592,7 +577,7 @@ module.exports = {
   GenerateToken,
   Authorization,
   SendMail,
-  CreateNotification,
+  generateUsername,
 };
 `
     );
@@ -766,8 +751,11 @@ class dbhelper {
   static async countrow(col, table, where, val) {
     return new Promise((resolve, _reject) => {
       try {
-        connection.query(
-          \`SELECT \${col} FROM \${table} WHERE \${where}='\${val}'\`,
+        const whereArray = appFunctions.sqlOptions(where);
+
+        const sql = \`SELECT \${col} FROM \${table} WHERE \${whereArray}\`;
+  
+        connection.query(sql,val,
           (_error, results) => {
             resolve(results.length);
           }
@@ -778,7 +766,6 @@ class dbhelper {
       }
     });
   }
-
   // -------- Update the fields in a table with the data provided using 1 field comparison
   static update(table, set, val, where, place) {
     return new Promise((resolve, _reject) => {
