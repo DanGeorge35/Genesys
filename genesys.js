@@ -32,28 +32,20 @@ class Genesys {
   static async setTableModel(tableName, fields) {
     const tbname = tableName.toLowerCase();
     const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
-    let model = `const escape = require('sql-escape');\n\nconst appFunctions = require("../helpers/app.helper");\n\n
-    function MakeEscape(ddata) {
-      if (ddata !== undefined) {
-        return escape(ddata);
-      }
-      return "";
-    }\n\nclass ${TableName} {\n`;
+    let model = `const appFunctions = require("../helpers/app.helper");\n\nclass ${TableName} {\n`;
     for (let i = 0; i < fields.name.length; i++) {
       model += `  ${fields.name[i]};\n\n`;
     }
     model += "  constructor(body) {\n";
     for (let i = 0; i < fields.name.length; i++) {
-      if (fields.name[i] === "UpdatedAT") {
+      if ((fields.name[i] === "UpdatedAT" )|| (fields.name[i] === "updated_at")) {
         model += `    this.${fields.name[i]} = appFunctions.humanTime(new Date());\n`;
-      } else if (fields.name[i] === "CreatedAT") {
+      } else if ((fields.name[i] === "CreatedAT") || (fields.name[i] === "created_at")) {
         model += `    this.${fields.name[i]} = appFunctions.humanTime(new Date());\n`;
+      } else if (fields.name[i].endsWith("_id")) {
+        model += `    this.${fields.name[i]} = body.${fields.name[i]};\n`;
       } else {
-        if (fields.required[i] === "YES") {
-          model += `    this.${fields.name[i]} = MakeEscape(body.${fields.name[i]}) || "";\n`;
-        } else {
-          model += `    this.${fields.name[i]} = MakeEscape(body.${fields.name[i]});\n`;
-        }
+          model += `    this.${fields.name[i]} = appFunctions.MakeEscape(body.${fields.name[i]});\n`;
       }
     }
     model += "  }\n\n";
@@ -428,14 +420,51 @@ const NotificationModel = require("../models/notification.model");
 
 dotenv.config();
 
-const uid = () =>
-  Date.now().toString(36) + Math.random().toString(36).substr(2);
+const uid = (characterCount = 10, prefix = "") => {
+  let timestamp = Date.now().toString(); // Use timestamp for uniqueness
+  let random = Math.floor(Math.random() * 10 ** (characterCount - timestamp.length)).toString(); // Add random number for additional uniqueness
+  let uniqueNumber = timestamp + random;
+  
+  if (prefix !== "") {
+    return prefix + uniqueNumber.toString(); // Append prefix if it is provided
+  }
+  
+  return uniqueNumber; // Return the generated UID
+};
+
+const generateUsername = (firstName, lastName) => {
+  // Convert first name and last name to lowercase
+  const lowerFirstName = firstName.toLowerCase();
+  const lowerLastName = lastName.toLowerCase();
+
+  // Remove spaces and special characters from first name and last name
+  const cleanedFirstName = lowerFirstName.replace(/\s/g, "").replace(/[^a-zA-Z0-9]/g, "");
+  const cleanedLastName = lowerLastName.replace(/\s/g, "").replace(/[^a-zA-Z0-9]/g, "");
+
+  // Combine the cleaned first name and last name
+  const username = cleanedFirstName + cleanedLastName;
+
+  return username;
+}
+
 
 const RND = () => Math.floor(Math.random() * 1000000) + 99999;
 
 function zeroPad(aNumber) {
   return \`0\${aNumber}\`.slice(-2);
 }
+
+function MakeEscape(ddata) {
+  if (ddata !== undefined) {
+    if (ddata == null) {
+      return "";
+    }else{
+      return escape(ddata);
+    }
+  }
+  return "";
+}
+
 
 async function passwordEncrypt(password) {
   return new Promise((resolve, _reject) => {
