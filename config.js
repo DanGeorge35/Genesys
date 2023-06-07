@@ -26,7 +26,6 @@ if (process.env.NODE_ENV === "") {
 const connection = mysql.createConnection(options); // SET DATABASE CONNECTION
 connection.connect((err) => {
   if (err) throw err;
-  console.log("DB Connected Successfully");
 }); // CONNECT TO DATABASE AND SHOW ERROR IF ERROR
 
 module.exports = { connection };

@@ -70,7 +70,7 @@ class Genesys {
   
     model += "`;\n    const newSql = sql.replace(/\"null\"/g, \"NULL\");\n";
 
-    model += "`    return newsql;\n";
+    model += "    return newSql;\n";
 
     model += `  }\n}\n\nmodule.exports = ${TableName};\n`;
 
@@ -315,10 +315,10 @@ class ${TableName}Handler {
           );
         }
 
-        if (DbHelper.columnExist("UpdatedAT")) {
+        if (DbHelper.columnExist("updated_at")) {
           result += await DbHelper.update(
             "${tableName}",
-            "UpdatedAT",
+            "updated_at",
             appFunctions.humanTime(new Date()),
             ["id"],
             data.id
@@ -398,6 +398,8 @@ module.exports = ${TableName}Handler;
 /* eslint-disable no-plusplus */
 /* eslint-disable implicit-arrow-linebreak */
 const jwt = require("jsonwebtoken");
+
+const escape = require("sql-escape");
 
 const axios = require("axios");
 
@@ -578,6 +580,7 @@ module.exports = {
   Authorization,
   SendMail,
   generateUsername,
+  MakeEscape,
 };
 `
     );
@@ -656,15 +659,21 @@ class dbhelper {
     return connection;
   }
 
+
+
   static async execute(Model) {
     return new Promise((resolve, _reject) => {
       connection.query(Model, (_error, results) => {
         try {
           if (_error != null) {
-            resolve(_error.sqlMessage);
+            if (_error.sqlMessage.endsWith("cannot be null")) {
+              let newErr =  _error.sqlMessage.replace(/cannot be null/g, "field can not be empty");
+               newErr =  newErr.replace(/Column /g, "");
+              resolve({"message":newErr,"code":400,"error":"Invalid input"});
+            }
           }
           if (results.affectedRows > -1) {
-            resolve("Success");
+            resolve({"message":"Success","code":200,"id":results.insertId});
           } else {
             resolve("Warning");
           }
@@ -674,6 +683,7 @@ class dbhelper {
       });
     });
   }
+  
 
   static async columnExist(Table, Col) {
     return new Promise((resolve, _reject) => {
