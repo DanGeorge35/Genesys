@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 /* eslint-disable comma-dangle */
 /* eslint-disable consistent-return */
+const https = require('https');
 const fs = require("fs");
 
 // const chalk = require('chalk');
@@ -16,7 +17,8 @@ const rl = readline.createInterface({
 const { Genesys } = require("./genesys");
 const GenDir = "PROJECT";
 
-let codetype,projname;
+let codetype,PROJECT,PORT,DB,DBPASS;
+  
 
 function Log(data){
   console.clear();
@@ -27,11 +29,9 @@ function Clear(){
   console.clear();
 }
 
-function clean(){
-
-}
 
 function generate(){
+  Clear();
   if (!fs.existsSync(GenDir)) {
     fs.mkdir(GenDir, { recursive: true }, (err) => {
       let fileDir = `${__dirname}/${GenDir}/models`;
@@ -118,10 +118,9 @@ function generateOption() {
       Clear();
      start();
     }else if(action == "1"){
-      Clear();
       generate();
     }else if(action == "2"){
-      getProjectName()
+      getProjectName();
     }else{
       Clear();
       start();
@@ -130,8 +129,68 @@ function generateOption() {
 }
  
 function getProjectName() {
-
+  Clear();
   const quest= '\nGENESYS: What is your Project Name?\n\nNote:  Enter m to return to Main OR Enter C to Close\n\nYOU:';
+
+  rl.question(quest, (action) => {
+    projname = action;
+    if((action == "c") ||(action == "C")){
+      Log("Bye\n");
+      process.exit();
+    }else if((action == "m") ||(action == "M")){
+      Clear();
+      start();
+    }else{
+      PROJECT = action;
+      getPort();
+    }
+  });
+}
+
+
+function getPort() {
+  Clear();
+  const quest= '\nGENESYS: Enter your preferable testing Port?\n\nNote:  Enter m to return to Main OR Enter C to Close\n\nYOU:';
+
+  rl.question(quest, (action) => {
+    projname = action;
+    if((action == "c") ||(action == "C")){
+      Log("Bye\n");
+      process.exit();
+    }else if((action == "m") ||(action == "M")){
+      Clear();
+      start();
+    }else{
+      PORT = action;
+      getDatabaseName();
+    }
+  });
+}
+
+
+function getDatabaseName() {
+  Clear();
+  const quest= '\nGENESYS: What is your Database Name?\n\nNote:  Enter m to return to Main OR Enter C to Close\n\nYOU:';
+
+  rl.question(quest, (action) => {
+    projname = action;
+    if((action == "c") ||(action == "C")){
+      Log("Bye\n");
+      process.exit();
+    }else if((action == "m") ||(action == "M")){
+      Clear();
+      start();
+    }else{
+      DB = action;
+      getDatabasePassword();
+    }
+  });
+}
+
+
+function getDatabasePassword() {
+  Clear();
+  const quest= '\nGENESYS: What is your Database Password?\n\nNote:  Enter m to return to Main OR Enter C to Close\n\nYOU:';
 
   rl.question(quest, (action) => {
     projname = action;
@@ -142,12 +201,35 @@ function getProjectName() {
       Clear();
      start();
     }else{
-      
+      DBPASS = action;
+      CreateENV();
     }
   });
-
-  
 }
 
+function CreateENV() {
+  console.log(PROJECT, DB,DBPASS,PORT);
+  wstream = fs.createWriteStream(__dirname + "/dot.env");
+let envContent=`# Node/Express Server Config
+PROJECT=${PROJECT}
+PORT=${PORT}
+DB=${DB}
+DBPASS=${DBPASS}
+DOMAIN=http://127.0.0.1
+NODE_ENV=main
+jwtkey=cryptoDBJ@9j{1ojK${PROJECT}`;
+console.log(envContent);
+  wstream.write(envContent);
+  wstream.end();
+  
+  Clear();
+
+  console.log(".ENV Successfully Created, Kindly update the .env with this new contents and rerun the app");
+  start();
+
+}
+
+
 Clear();
- start();
+start();
+

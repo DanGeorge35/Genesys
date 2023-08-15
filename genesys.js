@@ -1,6 +1,3 @@
-/* eslint-disable no-plusplus */
-/* eslint-disable no-array-constructor */
-/* eslint-disable comma-dangle */
 const fs = require("fs");
 const DbHelper = require("./dbhandler");
 require("dotenv").config();
@@ -21,7 +18,7 @@ class Genesys {
     const required = Array();
     const results = await DbHelper.runQuery(`DESCRIBE ${tableName}`);
     for (let i = 0; i < results.length; i++) {
-      if (results[i].Field !== "id") {
+      if ((results[i].Field !== "id") && (results[i].Field !== "ID")) {
         name.push(results[i].Field);
         required.push(results[i].Null);
       }
@@ -39,9 +36,9 @@ class Genesys {
     model += "  constructor(body) {\n";
     for (let i = 0; i < fields.name.length; i++) {
       if ((fields.name[i] === "UpdatedAT" )|| (fields.name[i] === "updated_at")) {
-        model += `    this.${fields.name[i]} = appFunctions.humanTime(new Date());\n`;
+        model += `    this.${fields.name[i]} = appFunctions.DateTime(new Date());\n`;
       } else if ((fields.name[i] === "CreatedAT") || (fields.name[i] === "created_at")) {
-        model += `    this.${fields.name[i]} = appFunctions.humanTime(new Date());\n`;
+        model += `    this.${fields.name[i]} = appFunctions.DateTime(new Date());\n`;
       } else if (fields.name[i].endsWith("_id")) {
         model += `    this.${fields.name[i]} = body.${fields.name[i]};\n`;
       } else {
@@ -77,7 +74,7 @@ class Genesys {
     return model;
   }
 
-  static async setService(tableName) {
+  static async setService(tableName,fields) {
     const tbname = tableName.toLowerCase();
     const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
     const fileDir = `${__dirname}/${GenDir}/services/${tbname}`;
@@ -93,6 +90,7 @@ class Genesys {
         let wstream = fs.createWriteStream(`${fileDir}/${tbname}.endpoint.js`);
         wstream.write(
           `const ${tbname}Controller = require("./${tbname}.controller");
+
 const appFunctions = require("../../helpers/app.helper");
 
 const ENDPOINT_URL = "/api/${tbname}";
@@ -142,18 +140,173 @@ module.exports = ${tbname}Endpoint;
         );
         wstream.end();
 
-        /*
-        .
-        .
-         ---------------------------------------------------------Controller
-        */
-        wstream = fs.createWriteStream(`${fileDir}/${tbname}.controller.js`);
-        wstream.write(
-          `/* eslint-disable no-console */
-/* eslint-disable consistent-return */
 
-const ${tbname}Handler = require("./${tbname}.handler");
+
+  
+
+         
+  /*
+  .
+  .
+    ---------------------------------------------------------Controller
+  */
+
+
+let HasUpload = false;
+let Uploads=[];
+let dController="";
+let CreateControler="";
+
+
+
+
+for (let i = 0; i < fields.name.length; i++) {
+  const dfield = fields.name[i];
+  const tdfield = dfield.toLowerCase();
+  if ( (tdfield.includes("picture")) || (tdfield.includes("image")) || (tdfield.includes("photo")) || (tdfield.includes("img")) ) {
+    HasUpload = true;
+    Uploads.push(dfield);
+  }
+}
+
+if(HasUpload ==true){
+  
+dController += `const fs = require('fs');
+
+const formidable = require('formidable');
+
+const dotenv = require("dotenv");
+dotenv.config();
+const appFunctions = require("../../helpers/app.helper");
+const DbHelper = require("../../helpers/db.helper");
+
+function renameUploadFile(uploadedfile,filename){
+  const oldPath = uploadedfile.filepath;
+  const extension = uploadedfile.originalFilename.substring(uploadedfile.originalFilename.lastIndexOf('.'));
+  const newPath = \`.\${filename}\${extension}\`;
+  const publicPath = \`\${process.env.DOMAIN}\${process.env.NODE_ENV}\${filename}\${extension}\`;
+  fs.renameSync(oldPath, newPath);
+  return publicPath;
+}
+`;
+
+CreateControler =`
+static async create${TableName}(req, res, next) {
+  try {
+    let result;
+    const form = new formidable.Formidable({ multiples: false });
+    form.parse(req, async (err, fields, files) => {
+      if (err) {
+        return res.status(400).json({ code:400,message:'Error parsing the request' });
+      }
+      const dir = "/public/${TableName}";
+      if (!fs.existsSync("."+dir)) {
+        fs.mkdirSync("."+dir);
+      }
+     const data = appFunctions.adjustFieldsToValue(fields);
+
+    req.body = data;
+    const validate = await  ${tbname}Validation.validateCreate${TableName}(req, res, next);
+    if(validate.result == "error"){
+      result = {};
+       result.code = 400;
+       result.message = validate.message;
+       return res.status(result.code).send(result);
+    }
+
+    let DID = appFunctions.uid("ID");
+    try {`;
+
+  for (let i = 0; i < Uploads.length; i++) {
+    const updfield = Uploads[i];
+    CreateControler+= `
+          if(files.${updfield} !== undefined){
+            const ${updfield} = files.${updfield}[0];
+            data.${updfield}= renameUploadFile(${updfield},\`\${dir}/${updfield}\${DID}\`);
+          }`;
+  }
+
+  for (let i = 0; i < Uploads.length; i++) {
+    const updfield = Uploads[i];
+    CreateControler+= `
+          if( files.${updfield} == undefined){
+            return res.status(400).send({code:400,message:"${updfield} must be uploaded"});
+          }`;
+  }
+  CreateControler+= `
+          if(data.Signature !== undefined){
+            const signature = \`SIG-\${DID}\`;
+            const base64Str = data.Signature;
+            const base64 = base64Str.replace("data:image/png;base64,", "");
+            const imagePath = \`.\${dir}/\${signature}.png\`;
+            const buffer = Buffer.from(base64, "base64");
+            fs.writeFileSync(imagePath, buffer);
+            data.Signature = \`\${process.env.DOMAIN}\${process.env.NODE_ENV}\${dir}/\${signature}.png\`;
+          }
+
+    } catch (err) {
+      const error = {code:400,message:"SYSTEM UPLOAD ERROR : "+err.message}
+      res.status(400).send(error);
+      console.error(err);
+      res.end();
+      return;
+    } 
+     
+      const ${tbname}_Result = await ${tbname}Handler.create${TableName}(data);
+
+      if(${tbname}_Result.code == 200){
+        ${tbname}_Result.data =  await DbHelper.find("${tbname}", ${tbname}_Result.id, ["id"]);
+        res.status(${tbname}_Result.code).send(${tbname}_Result);
+      }else{
+        Log.info(${tbname}_Result);
+        res.status(${tbname}_Result.code).send(${tbname}_Result);
+        res.end();
+      }
+    });
+
+  } catch (error) {
+    const err = {code:400,message:"SYSTEM ERROR : "+error.message}
+    res.status(400).send(err);
+    console.error(err);
+  }
+}
+`;
+
+
+}else{
+
+
+
+  CreateControler =`
+  static async create${TableName}(req, res, next) {
+    try {
+      let result;
+      const validate = await  ${tbname}Validation.validateCreate${TableName}(req, res, next);
+      if(validate.result == "error"){
+        result = {};
+         result.code = 400;
+         result.message = validate.message;
+      }else{
+         result = await ${tbname}Handler.create${TableName}(req.body);
+      }
+
+      Log.info(result);
+      res.status(result.code).send(result);
+      res.end();
+    } catch (error) {
+      Log.info(error);
+      next(error);
+    }
+  }
+  `;
+}
+
+
+
+
+dController +=`const ${tbname}Handler = require("./${tbname}.handler");
 const Log = require("../../helpers/console.helper");
+const ${tbname}Validation = require("./${tbname}.validation");
 
 class ${tbname}Controller {
   static async get${TableName}(req, res, next) {
@@ -193,22 +346,15 @@ class ${tbname}Controller {
       next(error);
     }
   }
+`;
 
-  static async create${TableName}(req, res, next) {
-    try {
-      const result = await ${tbname}Handler.create${TableName}(req.body);
-      Log.info(result);
-      res.status(result.code).send(result);
-      res.end();
-    } catch (error) {
-      Log.info(error);
-      next(error);
-    }
-  }
+dController +=CreateControler;
 
+  dController += `
   static async update${TableName}(req, res, next) {
     try {
-      const result = await ${tbname}Handler.update${TableName}(req.body);
+      
+      const  result = await ${tbname}Handler.update${TableName}(req.body);
       Log.info(result);
       res.status(result.code).send(result);
       res.end();
@@ -220,11 +366,15 @@ class ${tbname}Controller {
 
   static async delete${TableName}(req, res, next) {
     try {
+      res.status(401).send("Delete Endpoint Not Authorized");
+      res.end();
+      return;
+      /*
       const { id } = req.params;
       const ${tbname} = await ${tbname}Handler.delete${TableName}(id);
       Log.info(${tbname});
       res.status(${tbname}.code).send(${tbname});
-      res.end();
+      res.end();*/
     } catch (error) {
       Log.info(error);
       next(error);
@@ -233,8 +383,71 @@ class ${tbname}Controller {
 }
 module.exports = ${tbname}Controller;
 `
-        );
-        wstream.end();
+
+wstream = fs.createWriteStream(`${fileDir}/${tbname}.controller.js`);
+wstream.write(dController);
+wstream.end();
+
+
+
+
+/*
+  .
+  .
+    ---------------------------------------------------------Validation
+  */
+           
+wstream = fs.createWriteStream(`${fileDir}/${tbname}.validation.js`);
+let valid=`const Joi = require('joi');    
+const schema = Joi.object({\n`;
+    for (let i = 0; i < fields.name.length; i++) {
+        if ((fields.name[i] === "UpdatedAT" ) || (fields.name[i] === "status") || (fields.name[i] === "Status") || (fields.name[i] === "updated_at")  || (fields.name[i] === "CreatedAT")  || (fields.name[i] === "created_at")) {
+          continue;
+        }else if(Uploads.includes(fields.name[i])){
+          valid += `  ${fields.name[i]} : Joi.any().optional(),\n`;
+          continue;
+        }
+        valid += `  ${fields.name[i]} : Joi.string().required().min(1),\n`;
+    }
+      valid += `});
+// name : Joi.any().optional(); // for optional entry
+
+  class ${tbname}Validation {
+        static async validateCreate${TableName}(req, res, next) {
+          const { error, value } = schema.validate(req.body);
+          if (error) {
+              error.details[0].message = error.details[0].message.replace(/\\\\|"|\\\\/g, '');
+              return { "result" : "error", "message" : error.details[0].message };
+          }
+          return { "result" : "success", "message" : value };
+      }
+  }
+
+module.exports = ${tbname}Validation;
+
+/*--------------------------------------------------------- POSTMAN TEST DATA STRUCTURE\n`
+    if(HasUpload == false){
+      valid += ` { \n`;
+      for (let i = 0; i < fields.name.length; i++) {
+        if(i < (fields.name.length-1)){
+          valid += `    "${fields.name[i]}" : "",\n`;
+        }else{
+          valid += `    "${fields.name[i]}" : ""\n`
+        }
+      }
+      valid += `  } \n`;
+    }else{
+      for (let i = 0; i < fields.name.length; i++) {
+        valid += `  ${fields.name[i]}\n`
+      }
+    }
+    valid += `--------------------------------------------------------- POSTMAN TEST DATA STRUCTURE*/`;
+
+    wstream.write(valid);
+    wstream.end();
+
+             
+
 
         /*
         .
@@ -242,9 +455,7 @@ module.exports = ${tbname}Controller;
          ---------------------------------------------------------Handler
         */
         wstream = fs.createWriteStream(`${fileDir}/${tbname}.handler.js`);
-        wstream.write(`/* eslint-disable no-param-reassign */
-/* eslint-disable comma-dangle */
-const DbHelper = require("../../helpers/db.helper");
+        wstream.write(`const DbHelper = require("../../helpers/db.helper");
 const ${TableName}Model = require("../../models/${tbname}.model");
 
 const appFunctions = require("../../helpers/app.helper");
@@ -362,7 +573,8 @@ module.exports = ${TableName}Handler;
 
     for (let i = 0; i < tables.length; i++) {
       const tableName = tables[i];
-      this.setService(tableName);
+      const fields = await this.GetFields(tables[i]);
+      this.setService(tableName,fields);
     }
 
     const wstream = fs.createWriteStream(`${fileDir}/index.js`);
@@ -383,6 +595,281 @@ module.exports = ${TableName}Handler;
     wstream.end();
   }
 
+  
+  
+  static async createPostmanCalls() {
+    console.log("EHY");
+      const fileDir = `${__dirname}/${GenDir}/`;
+      const tables = await this.GetTables();
+      let postman_calls="";
+    ;
+          postman_calls +=`{
+  "info": {
+    "_postman_id": "44799335-29d0-46da-bfc3-73f4af37f4c1",
+    "name": "${process.env.PROJECT}",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+  },
+  "item": [
+`;
+          
+          for (let i = 0; i < tables.length; i++) {
+            const tbname = tables[i].toLowerCase();
+            const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
+            const fields = await this.GetFields(tables[i]);
+
+                    postman_calls += 
+            `         {
+                        "name": "${TableName}",
+                        "item": [
+            `;
+
+                              postman_calls +=`
+                              "item": [
+                                {
+                                  "name": "Get ${TableName}",
+                                  "protocolProfileBehavior": {
+                                    "disableBodyPruning": true
+                                  },
+                                  "request": {
+                                    "auth": {
+                                      "type": "bearer",
+                                      "bearer": [
+                                        {
+                                          "key": "token",
+                                          "value": "{{TOKEN}}",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    "method": "GET",
+                                    "header": [],
+                                    "body": {
+                                      "mode": "raw",
+                                      "raw": ""
+                                    },
+                                    "url": {
+                                      "raw": "{{BASE_URL}}/api/${tbname}",
+                                      "host": [
+                                        "{{BASE_URL}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "${tbname}"
+                                      ]
+                                    }
+                                  },
+                                  "response": []
+                                },
+                                {
+                                  "name": "Get Single ${TableName}",
+                                  "protocolProfileBehavior": {
+                                    "disableBodyPruning": true
+                                  },
+                                  "request": {
+                                    "auth": {
+                                      "type": "bearer",
+                                      "bearer": [
+                                        {
+                                          "key": "token",
+                                          "value": "{{TOKEN}}",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    "method": "GET",
+                                    "header": [],
+                                    "body": {
+                                      "mode": "raw",
+                                      "raw": ""
+                                    },
+                                    "url": {
+                                      "raw": "{{BASE_URL}}/api/${tbname}/:id",
+                                      "host": [
+                                        "{{BASE_URL}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "${tbname}",
+                                        ":id"
+                                      ]
+                                    }
+                                  },
+                                  "response": []
+                                },
+                                {
+                                  "name": "Update ${TableName}",
+                                  "request": {
+                                    "auth": {
+                                      "type": "bearer",
+                                      "bearer": [
+                                        {
+                                          "key": "token",
+                                          "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyIjp7ImlkIjoyLCJVc2VySUQiOiJsZG43dmhvZThyMzFxYWttbjluIiwiRmlyc3ROYW1lIjoiU3VwZXIiLCJMYXN0TmFtZSI6IkFkbWluIiwiRW1haWwiOiJzdXBlcmFkbWluQGtvYm93ZWIuY29tIiwiUm9sZSI6IlN1cGVyQWRtaW4iLCJVc2VyVHlwZSI6IkFkbWluIiwiUGFzc3dvcmRIYXNoIjoiJDJiJDEwJGxjSmRSaGNibEptSXJjdHdUNThjMy5kclQyVHU1Y3JwT1Y5TXNvSm8wckx6VkJub1QwOThtIiwiUGFzc3dvcmRTYWx0Ijp7InR5cGUiOiJCdWZmZXIiLCJkYXRhIjpbMzYsNTAsOTgsMzYsNDksNDgsMzYsMTA4LDk5LDc0LDEwMCw4MiwxMDQsOTksOTgsMTA4LDc0LDEwOSw3MywxMTQsOTksMTE2LDExOSw4NCw1Myw1Niw5OSw1MSw0NiwxMDAsMTE0LDg0LDUwLDg0LDExNyw1Myw5OSwxMTQsMTEyLDc5LDg2LDU3LDc3LDExNSwxMTEsNzQsMTExLDQ4LDExNCw3NiwxMjIsODYsNjYsMTEwLDExMSw4NCw0OCw1Nyw1NiwxMDldfSwiUmVmcmVzaFRva2VuIjoiIiwiVG9rZW4iOiI3MzE5IiwiVG9rZW5DcmVhdGVkIjoiMTY3NTM0OTU2NDk5MCIsIlRva2VuRXhwaXJlcyI6IjE2Nzc5NDE1NjQ5OTAiLCJWZXJpZmllZCI6MSwiQ3JlYXRlZEFUIjoiIn0sImlhdCI6MTY3NjkxMDU5OH0.ltidwUCOpvyQ5SX1yq4bsWaXlihLtrsNcMYOB3z_TgM",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    "method": "PUT",
+                                    "header": [
+                                      {
+                                        "key": "Content-Type",
+                                        "value": "application/json",
+                                        "type": "text"
+                                      }
+                                    ],
+                                    "body": {
+                                      "mode": "raw",
+                                      "raw": "{\\n    \\"status\\":\\"test\\",\\n }"
+                                    },
+                                    "url": {
+                                      "raw": "{{BASE_URL}}/api/${tbname}/",
+                                      "host": [
+                                        "{{BASE_URL}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "${tbname}",
+                                        ""
+                                      ]
+                                    }
+                                  },
+                                  "response": []
+                                },
+                                {
+                                  "name": "Delete ${TableName}",
+                                  "request": {
+                                    "auth": {
+                                      "type": "bearer",
+                                      "bearer": [
+                                        {
+                                          "key": "token",
+                                          "value": "{{TOKEN}}",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    "method": "DELETE",
+                                    "header": [],
+                                    "body": {
+                                      "mode": "formdata",
+                                      "formdata": []
+                                    },
+                                    "url": {
+                                      "raw": "{{BASE_URL}}/api/${tbname}/:id",
+                                      "host": [
+                                        "{{BASE_URL}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "Engagements",
+                                        ":id"
+                                      ]
+                                    }
+                                  },
+                                  "response": []
+                                },
+                                {
+                                  "name": "Create ${TableName}",
+                                  "event": [
+                                    {
+                                      "listen": "test",
+                                      "script": {
+                                        "exec": [
+                                          ""
+                                        ],
+                                        "type": "text/javascript"
+                                      }
+                                    },
+                                    {
+                                      "listen": "prerequest",
+                                      "script": {
+                                        "exec": [
+                                          ""
+                                        ],
+                                        "type": "text/javascript"
+                                      }
+                                    }
+                                  ],
+                                  "request": {
+                                    "auth": {
+                                      "type": "bearer",
+                                      "bearer": [
+                                        {
+                                          "key": "token",
+                                          "value": "{{TOKEN}}",
+                                          "type": "string"
+                                        }
+                                      ]
+                                    },
+                                    "method": "POST",
+                                    "header": [
+                                      {
+                                        "key": "Content-Type",
+                                        "value": " application/json",
+                                        "type": "text"
+                                      }
+                                    ],
+                                    "body": {
+                                      "mode": "raw",
+                                      "raw": "{\\r\\n  `;
+                                      for (let i = 0; i < fields.name.length; i++) {
+                                        let fdname = fields.name[i];
+                                        postman_calls+= `\\"${fdname}\\":\\"test\\",\\r\\n`;
+                                      }
+                                    
+
+                                      postman_calls +=`}\\r\\n"
+                                    },
+                                    "url": {
+                                      "raw": "{{BASE_URL}}/api/${tbname}/",
+                                      "host": [
+                                        "{{BASE_URL}}"
+                                      ],
+                                      "path": [
+                                        "api",
+                                        "${tbname}",
+                                        ""
+                                      ]
+                                    }
+                                  },
+                                  "response": []
+                                },
+                              ]`;
+          }
+           console.log("EHY3");
+          postman_calls += `	],
+            "auth": {
+              "type": "bearer"
+            },
+            "event": [
+              {
+                  "listen": "prerequest",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                },
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      ""
+                    ]
+                  }
+                }
+              ]
+          }
+          `;
+          console.log("EHY4");
+
+          const wstream = fs.createWriteStream(`${fileDir}/${process.env.PROJECT}.postman_byGenesis.json`);
+          wstream.write(postman_calls);
+          wstream.end();
+  }
+
   static async createHelpers() {
     const fileDir = `${__dirname}/${GenDir}/helpers`;
 
@@ -393,11 +880,7 @@ module.exports = ${TableName}Handler;
         */
     let wstream = fs.createWriteStream(`${fileDir}/app.helper.js`);
     wstream.write(
-      `/* eslint-disable comma-dangle */
-/* eslint-disable space-in-parens */
-/* eslint-disable no-plusplus */
-/* eslint-disable implicit-arrow-linebreak */
-const jwt = require("jsonwebtoken");
+      `const jwt = require("jsonwebtoken");
 
 const escape = require("sql-escape");
 
@@ -446,15 +929,14 @@ function zeroPad(aNumber) {
 
 function MakeEscape(ddata) {
   if (ddata !== undefined) {
-    if (ddata == null) {
-      return "";
-    }else{
-      return escape(ddata);
+    if (typeof ddata === 'string') {
+      return escape(ddata); // Escaping string values
+    } else {
+      return ddata; // For non-string values (e.g., integers), no escaping is needed
     }
   }
-  return "";
+  return null;
 }
-
 
 async function passwordEncrypt(password) {
   return new Promise((resolve, _reject) => {
@@ -501,6 +983,52 @@ function Authorization(req, res, next) {
   });
 }
 
+
+
+function adjustFieldsToValue(fieldsObject) {
+  const adjustedFields = {};
+  for (const fieldName in fieldsObject) {
+    if (fieldsObject.hasOwnProperty(fieldName)) {
+      const fieldValue = fieldsObject[fieldName][0];
+      adjustedFields[fieldName] = fieldValue;
+    }
+  }
+  return adjustedFields;
+}
+
+
+
+function isStrongPassword(password) {
+  // Check if the password is at least 8 characters long
+  if (password.length < 8) {
+    return {status:false, message:"password must be at least 8 characters long"};
+  }
+
+  // Check if the password contains at least one lowercase letter
+  if (!password.match(/[a-z]/)) {
+    return {status:false, message:"password must have at least one lowercase letter"};
+  }
+
+  // Check if the password contains at least one uppercase letter
+  if (!password.match(/[A-Z]/)) {
+    return {status:false, message:"password must contains at least one uppercase letter"};
+  }
+
+  // Check if the password contains at least one number
+  if (!password.match(/[0-9]/)) {
+    return {status:false, message:"password must contains at least one number"};
+  }
+
+  // Check if the password contains at least one special character
+  if (!password.match(/[!@?#\\$%\\^&\\*]/)) {
+    return {status:false, message:"password must contains at least one special character"};
+  }
+  
+  // If all checks pass, the password is strong
+  return {status:true, message:"password is strong"};
+}
+
+
 function humanTime(timeStamp) {
   const M = [
     "Jan",
@@ -522,6 +1050,19 @@ function humanTime(timeStamp) {
   } \${D.getDate()}, \${D.getFullYear()} \${D.getHours()}:\${zeroPad(
     D.getMinutes()
   )}:\${zeroPad(D.getSeconds())}\`;
+}
+
+function DateTime(timeStamp){
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1; // Months are zero-based
+  const day = date.getDate();
+  const hour = date.getHours();
+  const minute = date.getMinutes();
+  const second = date.getSeconds();
+
+  const formattedDate = \`\${year}-\${month.toString().padStart(2, '0')}-\${day.toString().padStart(2, '0')} \${hour.toString().padStart(2, '0')}:\${minute.toString().padStart(2, '0')}:\${second.toString().padStart(2, '0')}\`;
+  return formattedDate; // Output: 2023-07-12 15:30:45
 }
 
 function sqlOptions(options) {
@@ -574,6 +1115,7 @@ module.exports = {
   RND,
   sqlOptions,
   humanTime,
+  DateTime,
   passwordEncrypt,
   isValidPassword,
   GenerateToken,
@@ -581,6 +1123,8 @@ module.exports = {
   SendMail,
   generateUsername,
   MakeEscape,
+  adjustFieldsToValue,
+  isStrongPassword
 };
 `
     );
@@ -608,9 +1152,7 @@ module.exports = { info };
         ---------------------------------------------------------route.helper
         */
     wstream = fs.createWriteStream(`${fileDir}/route.helper.js`);
-    wstream.write(`/* eslint-disable comma-dangle */
-/* eslint-disable no-restricted-syntax */
-const dotenv = require("dotenv");
+    wstream.write(`const dotenv = require("dotenv");
 
 dotenv.config();
 
@@ -626,7 +1168,7 @@ class RouteHelper {
     router["get"](\`\${process.env.NODE_ENV}/\`, async (req, res) => {
       res.setHeader("content-type", "text/plain");
       const report = {
-        message: "You are welcome to Koboweb",
+        message: \`You are welcome to \${process.env.PROJECT}\`,
         code: 201,
       };
       res.status(201).send(report);
@@ -646,10 +1188,7 @@ module.exports = RouteHelper;
         */
     wstream = fs.createWriteStream(`${fileDir}/db.helper.js`);
     wstream.write(
-      `/* eslint-disable comma-dangle */
-/* eslint-disable no-console */
-/* eslint-disable no-unused-vars */
-const fs = require("fs");
+      `const fs = require("fs");
 const { connection } = require("../config/config");
 const appFunctions = require("./app.helper");
 const Log = require("./console.helper");
@@ -996,6 +1535,7 @@ module.exports = dbhelper;
     "express": "^4.18.1",
     "express-mysql-session": "^2.1.7",
     "express-sesssion": "^1.15.5",
+    "joi": "^17.9.2",
     "jsonwebtoken": "^8.5.1",
     "multer": "^1.4.5-lts.1",
     "mysql": "^2.18.1",
@@ -1025,10 +1565,7 @@ module.exports = dbhelper;
     wstream.end();
 
     wstream = fs.createWriteStream(`${fileDir}/index.js`);
-    wstream.write(`/* eslint-disable no-console */
-/* eslint-disable comma-dangle */
-/* eslint-disable consistent-return */
-const express = require("express");
+    wstream.write(`const express = require("express");
 
 const dotenv = require("dotenv");
 
@@ -1087,6 +1624,7 @@ app.listen(port, () => {
     this.createModel();
     this.createService();
     this.createStatic();
+    this.createPostmanCalls();
   }
 }
 
