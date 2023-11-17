@@ -16,68 +16,76 @@ class Genesys {
   static async GetFields(tableName) {
     const name = Array();
     const required = Array();
+    const type = Array();
     const results = await DbHelper.runQuery(`DESCRIBE ${tableName}`);
+
     for (let i = 0; i < results.length; i++) {
-      if ((results[i].Field !== "id") && (results[i].Field !== "ID")) {
-        name.push(results[i].Field);
-        required.push(results[i].Null);
-      }
+      name.push(results[i].Field);
+      required.push(results[i].Null);
+      type.push(results[i].Type);
     }
-    return { name, required };
+    return { name, required, type };
   }
 
   static async setTableModel(tableName, fields) {
     const tbname = tableName.toLowerCase();
+    // remove _ from tbname and make the first letter after _ capital letter making it camel case
+    let modelName = "";
+    if (tbname.includes("_")) {
+      let strs = tbname.split("_");
+      for (var i in strs) {
+        if (strs[i]) {
+          modelName += strs[i].charAt(0).toUpperCase() + strs[i].slice(1);
+        }
+      }
+    }
+
     const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
-    let model = `const appFunctions = require("../helpers/app.helper");\n\nclass ${TableName} {\n`;
-    for (let i = 0; i < fields.name.length; i++) {
-      model += `  ${fields.name[i]};\n\n`;
-    }
-    model += "  constructor(body) {\n";
-    for (let i = 0; i < fields.name.length; i++) {
-      if ((fields.name[i] === "UpdatedAT" )|| (fields.name[i] === "updated_at")) {
-        model += `    this.${fields.name[i]} = appFunctions.DateTime(new Date());\n`;
-      } else if ((fields.name[i] === "CreatedAT") || (fields.name[i] === "created_at")) {
-        model += `    this.${fields.name[i]} = appFunctions.DateTime(new Date());\n`;
-      } else if (fields.name[i].endsWith("_id")) {
-        model += `    this.${fields.name[i]} = body.${fields.name[i]};\n`;
-      } else {
-          model += `    this.${fields.name[i]} = appFunctions.MakeEscape(body.${fields.name[i]});\n`;
-      }
-    }
-    model += "  }\n\n";
-    model += "  model() {\n";
-    model += `    const sql = \`INSERT INTO ${tableName} (`;
-    for (let i = 0; i < fields.name.length; i++) {
-      if (i < fields.name.length - 1) {
-        model += `${fields.name[i]},`;
-      } else {
-        model += `${fields.name[i]}) VALUES (`;
-      }
-    }
 
+    let model = `import { DataTypes } from "sequelize"; \nimport sequelize from "../config/db";\n\nconst ${TableName} = sequelize.define(\n   "${tableName}",\n  {\n`;
     for (let i = 0; i < fields.name.length; i++) {
-      if (i < fields.name.length - 1) {
-        model += `"\${this.${fields.name[i]}}",`;
+      if (fields.name[i] === "id") {
+        model += `      ${fields.name[i]}: {
+        primaryKey: true,
+        autoIncrement: true,
+        type: DataTypes.INTEGER,
+      },\n`;
       } else {
-        model += `"\${this.${fields.name[i]}}");`;
+        let fieldtype,
+          allowNull = "";
+        if (fields.type[i] === "int") {
+          fieldtype = "INTEGER";
+        } else if (fields.type[i] === "bigint") {
+          fieldtype = "BIGINT";
+        } else {
+          fieldtype = "STRING";
+        }
+        if (fields.required[i] === "YES") {
+          allowNull = "true";
+        } else {
+          allowNull = "false";
+        }
+        model += `      ${fields.name[i]}: {
+        type: DataTypes.${fieldtype},
+        allowNull:${allowNull},
+      },\n`;
       }
     }
 
-  
-    model += "`;\n    const newSql = sql.replace(/\"null\"/g, \"NULL\");\n";
+    model += `  },\n  {\n\n  }\n);\n
+${TableName}.sync().then(() => {}).catch((err: any) => {
+        console.error('Error creating ${TableName} table:', err);
+});
 
-    model += "    return newSql;\n";
-
-    model += `  }\n}\n\nmodule.exports = ${TableName};\n`;
+export default ${TableName};\n`;
 
     return model;
   }
 
-  static async setService(tableName,fields) {
+  static async setService(tableName, fields) {
     const tbname = tableName.toLowerCase();
     const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
-    const fileDir = `${__dirname}/${GenDir}/services/${tbname}`;
+    const fileDir = `${__dirname}/${GenDir}/src/services/${tbname}`;
 
     if (!fs.existsSync(fileDir)) {
       fs.mkdir(fileDir, { recursive: true }, (err) => {
@@ -87,335 +95,412 @@ class Genesys {
         .
          ---------------------------------------------------------Endpoints
         */
-        let wstream = fs.createWriteStream(`${fileDir}/${tbname}.endpoint.js`);
+        let wstream = fs.createWriteStream(`${fileDir}/${tbname}.endpoint.ts`);
         wstream.write(
-          `const ${tbname}Controller = require("./${tbname}.controller");
+          `import ${TableName}Controller from "./${tbname}.controller";
+import { Authorization } from "../../libs/utils/app.utility";
 
-const appFunctions = require("../../helpers/app.helper");
-
-const ENDPOINT_URL = "/api/${tbname}";
-const ${tbname}Endpoint = [
-  {
-    path: \`\${ENDPOINT_URL}/\`,
-    method: "get",
-    handler: [${tbname}Controller.get${TableName}],
-  },
-  {
-    path: \`\${ENDPOINT_URL}/:id/\`,
-    method: "get",
-    handler: ${tbname}Controller.getSingle${TableName},
-  },
+const ENDPOINT_URL = "/api/v1/${tbname}";
+const ${TableName}Endpoint = [
   {
     path: \`\${ENDPOINT_URL}/\`,
     method: "post",
-    handler: [
-      appFunctions.Authorization,
-      ${tbname}Controller.create${TableName},
-    ],
+    handler: [Authorization, ${TableName}Controller.create${TableName}],
+  },
+   {
+    path: \`\${ENDPOINT_URL}/:id\`,
+    method: "patch",
+    handler: [Authorization, ${TableName}Controller.update${TableName}],
   },
   {
     path: \`\${ENDPOINT_URL}/\`,
-    method: "put",
-    handler: [
-      appFunctions.Authorization,
-      ${tbname}Controller.update${TableName},
-    ],
-  },
-  {
-    path: \`\${ENDPOINT_URL}/:id/\`,
-    method: "delete",
-    handler: [
-      appFunctions.Authorization,
-      ${tbname}Controller.delete${TableName},
-    ],
-  },
-  {
-    path: \`\${ENDPOINT_URL}/:start/:limit/\`,
     method: "get",
-    handler: [${tbname}Controller.get${TableName}2],
+    handler: [${TableName}Controller.getall${TableName}],
+  },
+  {
+    path: \`\${ENDPOINT_URL}/:id\`,
+    method: "get",
+    handler: [${TableName}Controller.getSingle${TableName}],
+  },
+  {
+    path: \`\${ENDPOINT_URL}/:id\`,
+    method: "delete",
+    handler: [Authorization, ${TableName}Controller.delete${TableName}],
   },
 ];
-module.exports = ${tbname}Endpoint;
+
+export default ${TableName}Endpoint;
+
 `
         );
         wstream.end();
 
-
-
-  
-
-         
-  /*
+        /*
   .
   .
     ---------------------------------------------------------Controller
   */
 
+        let HasUpload = false;
+        let Uploads = [];
+        let dController = "";
+        let CreateControler = "";
 
-let HasUpload = false;
-let Uploads=[];
-let dController="";
-let CreateControler="";
+        for (let i = 0; i < fields.name.length; i++) {
+          const dfield = fields.name[i];
+          const tdfield = dfield.toLowerCase();
+          if (
+            tdfield.includes("picture") ||
+            tdfield.includes("image") ||
+            tdfield.includes("photo") ||
+            tdfield.includes("upload") ||
+            tdfield.includes("img")
+          ) {
+            HasUpload = true;
+            Uploads.push(dfield);
+          }
+        }
+
+        if (HasUpload === true) {
+          dController += `/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/no-misused-promises */
+/* eslint-disable @typescript-eslint/no-extraneous-class */
+/* eslint-disable-next-line @typescript-eslint/no-misused-promises */
+import fs from "fs";
+import ${TableName} from "../../models/${tbname}.model";
+import ${TableName}Validation from "./${tbname}.validation";
+import { IncomingForm } from 'formidable';
+import { RenameUploadFile,getUIDfromDate,adjustFieldsToValue } from "../../libs/utils/app.utility";
+
+class ${TableName}Controller {
+        `;
+
+          CreateControler = `
+  /**
+ * Create ${TableName} Endpoint.
+ *
+ * @param {Object} req - The request object.
+ * @param {Object} res - The response object.
+ * @returns {Promise<any>} A Promise that resolves to the response.
+ */
+public static async create${TableName} (req: any, res: any, next: any): Promise<any> {
+  const form = new IncomingForm({ multiples: false });
+  form.parse(req, async (err, fields, files) => {
+     try {
+          if (err) {
+            return res
+              .status(400)
+              .json({ code: 400, message: "Error parsing the request" });
+          }
+          const dir = "/public/${tbname}";
+          if (!fs.existsSync(\`.\${dir}\`)) {
+            fs.mkdirSync(\`.\${dir}\`);
+          }
+          const data:any =  adjustFieldsToValue(fields);
+          const validate = await ${TableName}Validation.validateCreate${TableName}(data);
+
+          if (validate.result === "error") {
+            const result: { code: number; message: string } = {
+            code : 400,
+            message : validate.message
+            }
+            return res.status(result.code).send(result);
+          }
+
+          // Check if ${tbname} aldready exist
+          const checkExist = await ${TableName}.findOne({ where: {...data} });
+          if (checkExist !== null) {
+            return res.status(400).send({
+              message: "Record Already Exist In Server",
+              code: 400,
+            });
+          }
 
 
+          const DID =   getUIDfromDate();
 
-
-for (let i = 0; i < fields.name.length; i++) {
-  const dfield = fields.name[i];
-  const tdfield = dfield.toLowerCase();
-  if ( (tdfield.includes("picture")) || (tdfield.includes("image")) || (tdfield.includes("photo")) || (tdfield.includes("img")) ) {
-    HasUpload = true;
-    Uploads.push(dfield);
-  }
-}
-
-if(HasUpload ==true){
-  
-dController += `const fs = require('fs');
-
-const formidable = require('formidable');
-
-const dotenv = require("dotenv");
-dotenv.config();
-const appFunctions = require("../../helpers/app.helper");
-const DbHelper = require("../../helpers/db.helper");
-
-function renameUploadFile(uploadedfile,filename){
-  const oldPath = uploadedfile.filepath;
-  const extension = uploadedfile.originalFilename.substring(uploadedfile.originalFilename.lastIndexOf('.'));
-  const newPath = \`.\${filename}\${extension}\`;
-  const publicPath = \`\${process.env.DOMAIN}\${process.env.NODE_ENV}\${filename}\${extension}\`;
-  fs.renameSync(oldPath, newPath);
-  return publicPath;
-}
-`;
-
-CreateControler =`
-static async create${TableName}(req, res, next) {
-  try {
-    let result;
-    const form = new formidable.Formidable({ multiples: false });
-    form.parse(req, async (err, fields, files) => {
-      if (err) {
-        return res.status(400).json({ code:400,message:'Error parsing the request' });
-      }
-      const dir = "/public/${TableName}";
-      if (!fs.existsSync("."+dir)) {
-        fs.mkdirSync("."+dir);
-      }
-     const data = appFunctions.adjustFieldsToValue(fields);
-
-    req.body = data;
-    const validate = await  ${tbname}Validation.validateCreate${TableName}(req, res, next);
-    if(validate.result == "error"){
-      result = {};
-       result.code = 400;
-       result.message = validate.message;
-       return res.status(result.code).send(result);
-    }
-
-    let DID = appFunctions.uid("ID");
-    try {`;
-
-  for (let i = 0; i < Uploads.length; i++) {
-    const updfield = Uploads[i];
-    CreateControler+= `
-          if(files.${updfield} !== undefined){
-            const ${updfield} = files.${updfield}[0];
-            data.${updfield}= renameUploadFile(${updfield},\`\${dir}/${updfield}\${DID}\`);
-          }`;
-  }
-
-  for (let i = 0; i < Uploads.length; i++) {
-    const updfield = Uploads[i];
-    CreateControler+= `
-          if( files.${updfield} == undefined){
-            return res.status(400).send({code:400,message:"${updfield} must be uploaded"});
-          }`;
-  }
-  CreateControler+= `
-          if(data.Signature !== undefined){
-            const signature = \`SIG-\${DID}\`;
+           if(data.Signature !== undefined){
+            const signature = \`\${DID}-SIG\`;
             const base64Str = data.Signature;
             const base64 = base64Str.replace("data:image/png;base64,", "");
             const imagePath = \`.\${dir}/\${signature}.png\`;
             const buffer = Buffer.from(base64, "base64");
             fs.writeFileSync(imagePath, buffer);
-            data.Signature = \`\${process.env.DOMAIN}\${process.env.NODE_ENV}\${dir}/\${signature}.png\`;
+            data.Signature = \`\${process.env.DOMAIN}/\${process.env.NODE_ENV}\${dir}/\${signature}.png\`;
+          }
+          `;
+
+          for (let i = 0; i < Uploads.length; i++) {
+            const updfield = Uploads[i];
+            CreateControler += `
+          if(files.${updfield} !== undefined){
+            const ${updfield} = files.${updfield}[0];
+            data.${updfield}= RenameUploadFile(${updfield},\`\${dir}/\${DID}-PHOTO\`);
+          }`;
           }
 
-    } catch (err) {
-      const error = {code:400,message:"SYSTEM UPLOAD ERROR : "+err.message}
-      res.status(400).send(error);
-      console.error(err);
-      res.end();
-      return;
-    } 
-     
-      const ${tbname}_Result = await ${tbname}Handler.create${TableName}(data);
+          for (let i = 0; i < Uploads.length; i++) {
+            const updfield = Uploads[i];
+            CreateControler += `
+            if( files.${updfield} === undefined){
+              return res.status(400).send({code:400,message:"${updfield} must be uploaded"});
+            }`;
+          }
+          CreateControler += `
 
-      if(${tbname}_Result.code == 200){
-        ${tbname}_Result.data =  await DbHelper.find("${tbname}", ${tbname}_Result.id, ["id"]);
-        res.status(${tbname}_Result.code).send(${tbname}_Result);
-      }else{
-        Log.info(${tbname}_Result);
-        res.status(${tbname}_Result.code).send(${tbname}_Result);
-        res.end();
-      }
-    });
+        const new${TableName} = await ${TableName}.create({...data});
+          res.status(201).json({ success: true, data: new${TableName} });
 
-  } catch (error) {
-    const err = {code:400,message:"SYSTEM ERROR : "+error.message}
-    res.status(400).send(err);
-    console.error(err);
-  }
+        } catch (error:any) {
+          const err = { code: 400, message: \`SYSTEM ERROR : \${error.message}\` };
+          console.error(error);
+          return res.status(400).send(err);
+        }
+      });
 }
 `;
+        } else {
+          dController += `/* eslint-disable @typescript-eslint/strict-boolean-expressions */
+/* eslint-disable @typescript-eslint/no-misused-promises */
+/* eslint-disable @typescript-eslint/no-extraneous-class */
+/* eslint-disable-next-line @typescript-eslint/no-misused-promises */
+import fs from "fs";
+import { getUIDfromDate, EncryptPassword, GenerateToken, CheckPassword } from '../../libs/utils/app.utility'
+import ${TableName} from "../../models/${tbname}.model";
+import ${TableName}Validation from "./${tbname}.validation";
+import { getUIDfromDate } from "../../libs/utils/app.utility";
 
+class ${TableName}Controller {
+        `;
 
-}else{
-
-
-
-  CreateControler =`
-  static async create${TableName}(req, res, next) {
+          CreateControler = `
+/**
+ * Create ${TableName}
+ *
+ * @param {Object} req - The request object.
+ * @param {Object} res - The response object.
+ * @returns {Promise<any>} A Promise that resolves to the response.
+ */
+static async create${TableName} (req: any, res: any, next: any): Promise<any> {
     try {
-      let result;
-      const validate = await  ${tbname}Validation.validateCreate${TableName}(req, res, next);
-      if(validate.result == "error"){
-        result = {};
-         result.code = 400;
-         result.message = validate.message;
-      }else{
-         result = await ${tbname}Handler.create${TableName}(req.body);
-      }
+        const data = req.body;
+        const validate = await ${TableName}Validation.validateCreate${TableName}(data);
+        if (validate.result === "error") {
+            const result: { code: number; message: string } = {
+            code : 400,
+            message : validate.message
+            }
+            return res.status(result.code).send(result);
+        }
+          const dir = "/public/${tbname}";
+          if (!fs.existsSync(\`.\${dir}\`)) {
+            fs.mkdirSync(\`.\${dir}\`);
+          }
 
-      Log.info(result);
-      res.status(result.code).send(result);
-      res.end();
-    } catch (error) {
-      Log.info(error);
-      next(error);
+          const checkExist = await ${TableName}.findOne({ where: {...data} });
+          if (checkExist !== null) {
+            return res.status(400).send({
+              message: "This ${TableName} Record Already Exist",
+              code: 400,
+            });
+          }
+
+          const DID =   getUIDfromDate("ATD");
+            if (data.Signature !== undefined) {
+              const Signature = \`\${DID}-SIG\`;
+              const base64Str = data.Signature;
+              const base64 = base64Str.replace("data:image/png;base64,", "");
+              const imagePath = \`.\${dir}/\${Signature}.png\`;
+              const buffer = Buffer.from(base64, "base64");
+              fs.writeFileSync(imagePath, buffer);
+              data.Signature = \`\${process.env.DOMAIN}/\${process.env.NODE_ENV}\${dir}/\${Signature}.png\`;
+            }
+
+
+      const d${TableName} = await ${TableName}.create({...data});
+
+      res.status(201).json({ success: true, data: d${TableName} });
+
+    } catch (error:any) {
+      return res.status(400).send({
+        message: error.message,
+        code: 400,
+      });
     }
-  }
+  };
   `;
+        }
+
+        dController += CreateControler;
+
+        dController += `
+/**
+ * Single ${TableName}
+ *
+ * @param {Object} req - The request object.
+ * @param {Object} res - The response object.
+ * @returns {Promise<any>} A Promise that resolves to the response.
+ */
+  static async getSingle${TableName} (req: any, res: any, next: any): Promise<any> {
+    try {
+
+        const { id } = req.params;
+
+        const single${TableName} = await ${TableName}.findOne({ where: { id:id } });
+
+        if(!single${TableName}){
+            res.status(400).json({ success: false, data: \`No ${TableName} with the id \${req.params.id}\` });
+        }
+
+        res.status(200).json({ success: true, data: single${TableName} })
+
+   } catch (error:any) {
+          const err = { code: 400, message: \`SYSTEM ERROR : \${error.message}\` };
+          console.error(error);
+          return res.status(400).send(err);
+    }
+  }
+
+/**
+ * Get All ${TableName}
+ *
+ * @param {Object} req - The request object.
+ * @param {Object} res - The response object.
+ * @returns {Promise<any>} A Promise that resolves to the response.
+ */
+    static async getall${TableName} (req: any, res: any, next: any): Promise<any> {
+        const PAGE_SIZE = 10;
+
+        try {
+            let page: number = 1;
+
+            if (req.query.page && typeof req.query.page === 'string') {
+                page = parseInt(req.query.page, 10);
+            }
+
+            const all${TableName} = await ${TableName}.findAndCountAll({
+                limit: PAGE_SIZE,
+                offset: (page - 1) * PAGE_SIZE,
+            });
+
+            const totalPages = Math.ceil(all${TableName}.count / PAGE_SIZE);
+
+            res.status(200).json({
+                success: true,
+                data: all${TableName}.rows,
+                pagination: {
+                    currentPage: page,
+                    totalPages: totalPages,
+                    pageSize: PAGE_SIZE,
+                }
+            });
+
+       } catch (error:any) {
+          const err = { code: 400, message: \`SYSTEM ERROR : \${error.message}\` };
+          console.error(error);
+          return res.status(400).send(err);
+        }
+    }
+
+/**
+ * Update ${TableName}
+ *
+ * @param {Object} req - The request object.
+ * @param {Object} res - The response object.
+ * @returns {Promise<any>} A Promise that resolves to the response.
+ */
+    static async update${TableName} (req: any, res: any, next: any): Promise<any> {
+        try {
+            const agentId = req.params.id;
+            const updatedInfo = req.body;
+
+            const agent = await ${TableName}.findByPk(agentId);
+
+            if (!agent) {
+                return res.status(404).json({ success: false, message: '${TableName} not found' });
+            }
+
+            await agent.update(updatedInfo);
+
+            res.status(200).json({ success: true, data: agent, message: '${TableName} information updated' });
+        } catch (error:any) {
+          const err = { code: 400, message: \`SYSTEM ERROR : \${error.message}\` };
+          console.error(error);
+          return res.status(400).send(err);
+        }
+    }
+
+
+/**
+ * Delete ${TableName}
+ *
+ * @param {Object} req - The request object.
+ * @param {Object} res - The response object.
+ * @returns {Promise<any>} A Promise that resolves to the response.
+ */
+      static async delete${TableName} (req: any, res: any, next: any): Promise<any> {
+      try {
+        const ${tbname}Id = req.params.id;
+
+        const ${tbname} = await ${TableName}.findByPk(${tbname}Id);
+
+        if (!${tbname}) {
+          return res
+            .status(404)
+            .json({ success: false, message: "${TableName} not found" });
+        }
+
+        await ${tbname}.destroy();
+
+        res.status(200).json({ success: true, message: "${TableName} deleted" });
+      } catch (error:any) {
+          const err = { code: 400, message: \`SYSTEM ERROR : \${error.message}\` };
+          console.error(error);
+          return res.status(400).send(err);
+      }
+    }
+
 }
 
-
-
-
-dController +=`const ${tbname}Handler = require("./${tbname}.handler");
-const Log = require("../../helpers/console.helper");
-const ${tbname}Validation = require("./${tbname}.validation");
-
-class ${tbname}Controller {
-  static async get${TableName}(req, res, next) {
-    try {
-      const ${tbname} = await ${tbname}Handler.get${TableName}();
-      Log.info(${tbname});
-      res.status(${tbname}.code).send(${tbname});
-      res.end();
-    } catch (error) {
-      Log.info(error);
-      next(error);
-    }
-  }
-
-  static async get${TableName}2(req, res, next) {
-    try {
-      const { start, limit } = req.params;
-      const ${tbname} = await ${tbname}Handler.get${TableName}(start, limit);
-      Log.info(${tbname});
-      res.status(${tbname}.code).send(${tbname});
-      res.end();
-    } catch (error) {
-      Log.info(error);
-      next(error);
-    }
-  }
-
-  static async getSingle${TableName}(req, res, next) {
-    try {
-      const { id } = req.params;
-      const ${tbname} = await ${tbname}Handler.getSingle${TableName}(id);
-      Log.info(${tbname});
-      res.status(${tbname}.code).send(${tbname});
-      res.end();
-    } catch (error) {
-      Log.info(error);
-      next(error);
-    }
-  }
+export default ${TableName}Controller;
 `;
 
-dController +=CreateControler;
+        wstream = fs.createWriteStream(`${fileDir}/${tbname}.controller.ts`);
+        wstream.write(dController);
+        wstream.end();
 
-  dController += `
-  static async update${TableName}(req, res, next) {
-    try {
-      
-      const  result = await ${tbname}Handler.update${TableName}(req.body);
-      Log.info(result);
-      res.status(result.code).send(result);
-      res.end();
-    } catch (error) {
-      Log.info(error);
-      next(error);
-    }
-  }
-
-  static async delete${TableName}(req, res, next) {
-    try {
-      res.status(401).send("Delete Endpoint Not Authorized");
-      res.end();
-      return;
-      /*
-      const { id } = req.params;
-      const ${tbname} = await ${tbname}Handler.delete${TableName}(id);
-      Log.info(${tbname});
-      res.status(${tbname}.code).send(${tbname});
-      res.end();*/
-    } catch (error) {
-      Log.info(error);
-      next(error);
-    }
-  }
-}
-module.exports = ${tbname}Controller;
-`
-
-wstream = fs.createWriteStream(`${fileDir}/${tbname}.controller.js`);
-wstream.write(dController);
-wstream.end();
-
-
-
-
-/*
+        /*
   .
   .
     ---------------------------------------------------------Validation
   */
-           
-wstream = fs.createWriteStream(`${fileDir}/${tbname}.validation.js`);
-let valid=`const Joi = require('joi');    
+
+        wstream = fs.createWriteStream(`${fileDir}/${tbname}.validation.ts`);
+        let valid = `/* eslint-disable @typescript-eslint/no-extraneous-class */\nimport Joi from "joi";\n
 const schema = Joi.object({\n`;
-    for (let i = 0; i < fields.name.length; i++) {
-        if ((fields.name[i] === "UpdatedAT" ) || (fields.name[i] === "status") || (fields.name[i] === "Status") || (fields.name[i] === "updated_at")  || (fields.name[i] === "CreatedAT")  || (fields.name[i] === "created_at")) {
-          continue;
-        }else if(Uploads.includes(fields.name[i])){
-          valid += `  ${fields.name[i]} : Joi.any().optional(),\n`;
-          continue;
+        for (let i = 0; i < fields.name.length; i++) {
+          if (
+            fields.name[i] === "UpdatedAT" ||
+            fields.name[i] === "status" ||
+            fields.name[i] === "Status" ||
+            fields.name[i] === "updatedAt" ||
+            fields.name[i] === "CreatedAT" ||
+            fields.name[i] === "createdAt"
+          ) {
+            continue;
+          } else if (Uploads.includes(fields.name[i])) {
+            valid += `  ${fields.name[i]}: Joi.any().optional(),\n`;
+            continue;
+          }
+          valid += `  ${fields.name[i]}: Joi.string().required().min(1),\n`;
         }
-        valid += `  ${fields.name[i]} : Joi.string().required().min(1),\n`;
-    }
-      valid += `});
+        valid += `});
 // name : Joi.any().optional(); // for optional entry
 
-  class ${tbname}Validation {
-        static async validateCreate${TableName}(req, res, next) {
-          const { error, value } = schema.validate(req.body);
-          if (error) {
+  class ${TableName}Validation {
+        static async validateCreate${TableName}(data:any):  Promise<any> {
+          const { error, value } = schema.validate(data);
+          if (error!= null) {
               error.details[0].message = error.details[0].message.replace(/\\\\|"|\\\\/g, '');
               return { "result" : "error", "message" : error.details[0].message };
           }
@@ -423,187 +508,84 @@ const schema = Joi.object({\n`;
       }
   }
 
-module.exports = ${tbname}Validation;
 
-/*--------------------------------------------------------- POSTMAN TEST DATA STRUCTURE\n`
-    if(HasUpload == false){
-      valid += ` { \n`;
-      for (let i = 0; i < fields.name.length; i++) {
-        if(i < (fields.name.length-1)){
-          valid += `    "${fields.name[i]}" : "",\n`;
-        }else{
-          valid += `    "${fields.name[i]}" : ""\n`
+export default  ${TableName}Validation;
+
+/*--------------------------------------------------------- POSTMAN TEST DATA STRUCTURE\n`;
+
+        if (HasUpload == false) {
+          valid += ` { \n`;
+          for (let i = 0; i < fields.name.length; i++) {
+            if (i < fields.name.length - 1) {
+              valid += `    "${fields.name[i]}" : "",\n`;
+            } else {
+              valid += `    "${fields.name[i]}" : ""\n`;
+            }
+          }
+          valid += `  } \n`;
+        } else {
+          for (let i = 0; i < fields.name.length; i++) {
+            valid += `  ${fields.name[i]}\n`;
+          }
         }
-      }
-      valid += `  } \n`;
-    }else{
-      for (let i = 0; i < fields.name.length; i++) {
-        valid += `  ${fields.name[i]}\n`
-      }
-    }
-    valid += `--------------------------------------------------------- POSTMAN TEST DATA STRUCTURE*/`;
+        valid += `--------------------------------------------------------- POSTMAN TEST DATA STRUCTURE*/`;
 
-    wstream.write(valid);
-    wstream.end();
-
-             
-
-
-        /*
-        .
-        .
-         ---------------------------------------------------------Handler
-        */
-        wstream = fs.createWriteStream(`${fileDir}/${tbname}.handler.js`);
-        wstream.write(`const DbHelper = require("../../helpers/db.helper");
-const ${TableName}Model = require("../../models/${tbname}.model");
-
-const appFunctions = require("../../helpers/app.helper");
-
-class ${TableName}Handler {
-  static async get${TableName}(start = 0, limit = 100) {
-    const ${tbname} = await DbHelper.findTable("${tableName}", start, limit);
-    return {
-      message: "Success",
-      code: 200,
-      data: ${tbname},
-    };
-  }
-
-  static async getSingle${TableName}(id) {
-    const ${tbname} = await DbHelper.find("${tableName}", id, ["id"]);
-    if (${tbname} === "") {
-      return { message: "${TableName}  Not Found!", code: 400 };
-    }
-    return {
-      message: "Success",
-      code: 200,
-      data: ${tbname},
-    };
-  }
-
-  static async delete${TableName}(id) {
-    const ${tbname} = await DbHelper.Delete("${tableName}", ["id"], id);
-    if (${tbname} !== "Success") {
-      return { message: ${tbname}, code: 400 };
-    }
-    return {
-      message: "Success",
-      code: 200,
-    };
-  }
-
-  static async create${TableName}(data) {
-    // eslint-disable-next-line no-param-reassign
-    const ${tbname} = new ${TableName}Model(data);
-    const result = await DbHelper.execute(${tbname}.model());
-    const rs = await DbHelper.find("${tbname}", result.id, ["id"]);
-    result.data = rs;
-    return result;
-  }
-
-  static async update${TableName}(data) {
-    // eslint-disable-next-line no-param-reassign
-    const ${tbname} = await DbHelper.find(
-      "${tableName}",
-      [data.id],
-      ["id"]
-    );
-
-    if (${tbname} === "") {
-      return { message: "${TableName} Record  Not found", code: 404 };
-    }
-    let result = "";
-    Object.entries(data).forEach(async ([key, value]) => {
-      if (key !== "id") {
-        if (DbHelper.columnExist(key)) {
-          result += await DbHelper.update(
-            "${tableName}",
-            key,
-            value,
-            ["id"],
-            data.id
-          );
-        }
-
-        if (DbHelper.columnExist("updated_at")) {
-          result += await DbHelper.update(
-            "${tableName}",
-            "updated_at",
-            appFunctions.humanTime(new Date()),
-            ["id"],
-            data.id
-          );
-        }
-      }
-    });
-
-    return {
-      message: "Successfully Updated!",
-      code: 200,
-      data: result,
-    };
-  }
-}
-
-module.exports = ${TableName}Handler;
-`);
+        wstream.write(valid);
+        wstream.end();
       });
     }
   }
 
   static async createModel(tableName = "") {
-    const fileDir = `${__dirname}/${GenDir}/models`;
+    const fileDir = `${__dirname}/${GenDir}/src/models`;
     if (tableName === "") {
       const tables = await this.GetTables();
       for (let i = 0; i < tables.length; i++) {
         const fields = await this.GetFields(tables[i]);
         const result = await this.setTableModel(tables[i], fields);
         const tbname = tables[i].toLowerCase();
-        const wstream = fs.createWriteStream(`${fileDir}/${tbname}.model.js`);
+        const wstream = fs.createWriteStream(`${fileDir}/${tbname}.model.ts`);
         wstream.write(result);
       }
     }
   }
 
   static async createService() {
-    const fileDir = `${__dirname}/${GenDir}/services/`;
+    const fileDir = `${__dirname}/${GenDir}/src/services/`;
 
     const tables = await this.GetTables();
 
     for (let i = 0; i < tables.length; i++) {
       const tableName = tables[i];
       const fields = await this.GetFields(tables[i]);
-      this.setService(tableName,fields);
+      this.setService(tableName, fields);
     }
 
-    const wstream = fs.createWriteStream(`${fileDir}/index.js`);
+    const wstream = fs.createWriteStream(`${fileDir}/index.ts`);
     let content = "";
     for (let i = 0; i < tables.length; i++) {
       let tableName = tables[i];
       const tbname = tableName.toLowerCase();
-      content += `const ${tbname}Endpoint = require("./${tbname}/${tbname}.endpoint");\n`;
+      content += `import ${tbname}Endpoint  from './${tbname}/${tbname}.endpoint'\n`;
     }
-    content += "module.exports = [\n";
+
+    content += "\n\nexport default [\n";
     for (let i = 0; i < tables.length; i++) {
       let tableName = tables[i];
       const tbname = tableName.toLowerCase();
-      content += `  ...${tbname}Endpoint,`;
+      content += `  ...${tbname}Endpoint,\n`;
     }
     content += "];\n";
     wstream.write(content);
     wstream.end();
   }
 
-  
-  
   static async createPostmanCalls() {
     console.log("EHY");
-      const fileDir = `${__dirname}/${GenDir}/`;
-      const tables = await this.GetTables();
-      let postman_calls="";
-    ;
-          postman_calls +=`{
+    const fileDir = `${__dirname}/${GenDir}/`;
+    const tables = await this.GetTables();
+    let postman_calls = "";
+    postman_calls += `{
   "info": {
     "_postman_id": "44799335-29d0-46da-bfc3-73f4af37f4c1",
     "name": "${process.env.PROJECT}",
@@ -611,19 +593,18 @@ module.exports = ${TableName}Handler;
   },
   "item": [
 `;
-          
-          for (let i = 0; i < tables.length; i++) {
-            const tbname = tables[i].toLowerCase();
-            const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
-            const fields = await this.GetFields(tables[i]);
 
-                    postman_calls += 
-            `         {
+    for (let i = 0; i < tables.length; i++) {
+      const tbname = tables[i].toLowerCase();
+      const TableName = tbname.charAt(0).toUpperCase() + tbname.slice(1);
+      const fields = await this.GetFields(tables[i]);
+
+      postman_calls += `         {
                         "name": "${TableName}",
                         "item": [
             `;
 
-                              postman_calls +=`
+      postman_calls += `
                               "item": [
                                 {
                                   "name": "Get ${TableName}",
@@ -812,13 +793,12 @@ module.exports = ${TableName}Handler;
                                     "body": {
                                       "mode": "raw",
                                       "raw": "{\\r\\n  `;
-                                      for (let i = 0; i < fields.name.length; i++) {
-                                        let fdname = fields.name[i];
-                                        postman_calls+= `\\"${fdname}\\":\\"test\\",\\r\\n`;
-                                      }
-                                    
+      for (let i = 0; i < fields.name.length; i++) {
+        let fdname = fields.name[i];
+        postman_calls += `\\"${fdname}\\":\\"test\\",\\r\\n`;
+      }
 
-                                      postman_calls +=`}\\r\\n"
+      postman_calls += `}\\r\\n"
                                     },
                                     "url": {
                                       "raw": "{{BASE_URL}}/api/${tbname}/",
@@ -835,9 +815,9 @@ module.exports = ${TableName}Handler;
                                   "response": []
                                 },
                               ]`;
-          }
-           console.log("EHY3");
-          postman_calls += `	],
+    }
+    console.log("EHY3");
+    postman_calls += `	],
             "auth": {
               "type": "bearer"
             },
@@ -863,648 +843,185 @@ module.exports = ${TableName}Handler;
               ]
           }
           `;
-          console.log("EHY4");
+    console.log("EHY4");
 
-          const wstream = fs.createWriteStream(`${fileDir}/${process.env.PROJECT}.postman_byGenesis.json`);
-          wstream.write(postman_calls);
-          wstream.end();
+    const wstream = fs.createWriteStream(
+      `${fileDir}/${process.env.PROJECT}.postman_byGenesis.json`
+    );
+    wstream.write(postman_calls);
+    wstream.end();
   }
 
   static async createHelpers() {
-    const fileDir = `${__dirname}/${GenDir}/helpers`;
+    const fileDir = `${__dirname}/${GenDir}/src/libs/`;
 
     /*
         .
         .
          ---------------------------------------------------------app.helpers
         */
-    let wstream = fs.createWriteStream(`${fileDir}/app.helper.js`);
+    let wstream = fs.createWriteStream(`${fileDir}/utils/app.helper.ts`);
     wstream.write(
-      `const jwt = require("jsonwebtoken");
+      `import jwt from 'jsonwebtoken'
+import bcrypt from 'bcrypt'
+import fs from 'fs'
+import { type Fields } from 'formidable'
 
-const escape = require("sql-escape");
-
-const axios = require("axios");
-
-const bcrypt = require("bcrypt");
-
-const dotenv = require("dotenv");
-
-
-dotenv.config();
-
-const uid = (characterCount = 10, prefix = "") => {
-  let timestamp = Date.now().toString(); // Use timestamp for uniqueness
-  let random = Math.floor(Math.random() * 10 ** (characterCount - timestamp.length)).toString(); // Add random number for additional uniqueness
-  let uniqueNumber = timestamp + random;
-  
-  if (prefix !== "") {
-    return prefix + uniqueNumber.toString(); // Append prefix if it is provided
-  }
-  
-  return uniqueNumber; // Return the generated UID
-};
-
-const generateUsername = (firstName, lastName) => {
-  // Convert first name and last name to lowercase
-  const lowerFirstName = firstName.toLowerCase();
-  const lowerLastName = lastName.toLowerCase();
-
-  // Remove spaces and special characters from first name and last name
-  const cleanedFirstName = lowerFirstName.replace(/\s/g, "").replace(/[^a-zA-Z0-9]/g, "");
-  const cleanedLastName = lowerLastName.replace(/\s/g, "").replace(/[^a-zA-Z0-9]/g, "");
-
-  // Combine the cleaned first name and last name
-  const username = cleanedFirstName + cleanedLastName;
-
-  return username;
-}
-
-
-const RND = () => Math.floor(Math.random() * 1000000) + 99999;
-
-function zeroPad(aNumber) {
-  return \`0\${aNumber}\`.slice(-2);
-}
-
-function MakeEscape(ddata) {
-  if (ddata !== undefined) {
-    if (typeof ddata === 'string') {
-      return escape(ddata); // Escaping string values
-    } else {
-      return ddata; // For non-string values (e.g., integers), no escaping is needed
-    }
-  }
-  return null;
-}
-
-async function passwordEncrypt(password) {
-  return new Promise((resolve, _reject) => {
-    const saltRounds = 10;
-    bcrypt.hash(password, saltRounds, (err, hash) => {
-      if (err) {
-        _reject(err);
-      }
-      resolve(hash);
-    });
-  });
-}
-
-function isValidPassword(password, hash) {
+function Authorization (req: any, res: any, next: any): any {
   // eslint-disable-next-line no-unused-vars
-  return new Promise((resolve, _reject) => {
-    bcrypt.compare(password, hash, (err, result) => {
-      if (err) {
-        _reject(err);
-      }
-      if (result) {
-        resolve(true);
-      }
-      resolve(false);
-    });
-  });
-}
-
-function GenerateToken(content) {
-  return jwt.sign({ user: content }, process.env.jwtkey);
-}
-
-function Authorization(req, res, next) {
-  // eslint-disable-next-line no-unused-vars
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.split(" ")[1];
-  if (token == null) return res.status(401).send("Not Authorised");
+  const authHeader = req.headers.authorization
+  const token = authHeader?.split(' ')[1]
+  if (token == null) return res.status(401).send('Not Authorised')
 
   // eslint-disable-next-line consistent-return
-  jwt.verify(token, process.env.jwtkey, (err, user) => {
-    if (err) return res.status(403).send("Invalid Token");
-    req.user = user;
-    next();
-  });
+  const JWT_KEY: any = process.env.jwtkey
+  jwt.verify(token, JWT_KEY, (err: any, user: any) => {
+    if (err !== null) return res.status(403).send('Invalid Token')
+    req.user = user
+    next()
+  })
 }
 
+function GenerateToken (data: any): string {
+  const JWT_SECRET: any = process.env.jwtkey
+  return jwt.sign({ data }, JWT_SECRET, { expiresIn: '30d' })
+}
+async function CheckPassword (password: string, hash: string): Promise<boolean> {
+  return await bcrypt.compare(password, hash)
+}
 
+async function EncryptPassword (password: string): Promise<string> {
+  const saltRounds = 10
+  return await bcrypt.hash(password, saltRounds)
+}
 
-function adjustFieldsToValue(fieldsObject) {
-  const adjustedFields = {};
+function adjustFieldsToValue (
+  fieldsObject: Fields<string>
+): Record<string, string> {
+  const adjustedFields: Record<string, string> = {}
+
   for (const fieldName in fieldsObject) {
-    if (fieldsObject.hasOwnProperty(fieldName)) {
-      const fieldValue = fieldsObject[fieldName][0];
-      adjustedFields[fieldName] = fieldValue;
+    if (fieldName in fieldsObject) {
+      const fieldValue = fieldsObject[fieldName]?.[0] ?? '' // Using optional chaining and nullish coalescing
+      adjustedFields[fieldName] = fieldValue
     }
   }
-  return adjustedFields;
+  return adjustedFields
 }
 
+function RenameUploadFile (uploadedfile: any, filename: string): string {
+  const oldPath = uploadedfile.filepath
+  const extension = uploadedfile.originalFilename.substring(
+    uploadedfile.originalFilename.lastIndexOf('.')
+  )
+  const newPath = \`.\${filename}\${extension}\`
+  const publicPath = \`\${process.env.DOMAIN}/\${process.env.NODE_ENV}\${filename}\${extension}\`
+  fs.renameSync(oldPath, newPath)
+  return publicPath
+}
 
+function getUIDfromDate (prefix = ''): string {
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = date.getMonth() + 1 // Months are zero-based
+  const day = date.getDate()
+  const hour = date.getHours()
+  const minute = date.getMinutes()
+  const second = date.getSeconds()
+  const random = (Math.floor(Math.random() * 9) + 1).toString()
+  const uniqueNumber =
+    year.toString() +
+    month.toString() +
+    day.toString() +
+    hour.toString() +
+    minute.toString() +
+    second.toString() +
+    random.substring(0, 2)
+  // uniqueNumber = uniqueNumber.substring(uniqueNumber.length - length);
 
-function isStrongPassword(password) {
-  // Check if the password is at least 8 characters long
-  if (password.length < 8) {
-    return {status:false, message:"password must be at least 8 characters long"};
+  if (prefix !== '') {
+    return prefix + uniqueNumber.toString() // Append prefix if it is provided
   }
-
-  // Check if the password contains at least one lowercase letter
-  if (!password.match(/[a-z]/)) {
-    return {status:false, message:"password must have at least one lowercase letter"};
-  }
-
-  // Check if the password contains at least one uppercase letter
-  if (!password.match(/[A-Z]/)) {
-    return {status:false, message:"password must contains at least one uppercase letter"};
-  }
-
-  // Check if the password contains at least one number
-  if (!password.match(/[0-9]/)) {
-    return {status:false, message:"password must contains at least one number"};
-  }
-
-  // Check if the password contains at least one special character
-  if (!password.match(/[!@?#\\$%\\^&\\*]/)) {
-    return {status:false, message:"password must contains at least one special character"};
-  }
-  
-  // If all checks pass, the password is strong
-  return {status:true, message:"password is strong"};
+  return \`IDN\${uniqueNumber.toString()}\`
 }
 
-
-function humanTime(timeStamp) {
-  const M = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-  ];
-  const D = new Date(timeStamp); // 23 Aug 2016 16:45:59 <-- Desired format.
-  return \`\${
-    M[D.getMonth()]
-  } \${D.getDate()}, \${D.getFullYear()} \${D.getHours()}:\${zeroPad(
-    D.getMinutes()
-  )}:\${zeroPad(D.getSeconds())}\`;
-}
-
-function DateTime(timeStamp){
-  const date = new Date();
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1; // Months are zero-based
-  const day = date.getDate();
-  const hour = date.getHours();
-  const minute = date.getMinutes();
-  const second = date.getSeconds();
-
-  const formattedDate = \`\${year}-\${month.toString().padStart(2, '0')}-\${day.toString().padStart(2, '0')} \${hour.toString().padStart(2, '0')}:\${minute.toString().padStart(2, '0')}:\${second.toString().padStart(2, '0')}\`;
-  return formattedDate; // Output: 2023-07-12 15:30:45
-}
-
-function sqlOptions(options) {
-  let str = "";
-  let i = 0;
-  do {
-    if (i === options.length - 1) {
-      str += \`\${options[i]}=?\`;
-    } else {
-      str += \`\${options[i]}=? &&\`;
-    }
-    i++;
-  } while (i < options.length);
-
-  return str;
-}
-
-
-
-async function SendMail(templateID, templateParams) {
-  const options = {
-    service_id: "service_KobowebTest",
-    template_id: templateID,
-    user_id: "V7qFJQBmM39i7kDg6",
-    template_params: templateParams,
-  };
-
-  const ddata = JSON.stringify(options);
-
-  const config = {
-    method: "post",
-    url: "https://api.emailjs.com/api/v1.0/email/send",
-    data: ddata,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  };
-
-  await axios(config)
-    .then((response) => {
-      console.log(JSON.stringify(response.data));
-    })
-    .catch((error) => {
-      console.log(error.code);
-    });
-}
-
-module.exports = {
-  uid,
-  RND,
-  sqlOptions,
-  humanTime,
-  DateTime,
-  passwordEncrypt,
-  isValidPassword,
-  GenerateToken,
+export {
   Authorization,
-  SendMail,
-  generateUsername,
-  MakeEscape,
+  GenerateToken,
+  EncryptPassword,
+  CheckPassword,
+  RenameUploadFile,
   adjustFieldsToValue,
-  isStrongPassword
-};
+  getUIDfromDate
+}
 `
     );
     wstream.end();
 
     /*
         .
-        .
-         ---------------------------------------------------------console.helper
-        */
-    wstream = fs.createWriteStream(`${fileDir}/console.helper.js`);
-    wstream.write(
-      `const { log } = console;
-
-const info = (args) => log(args);
-
-module.exports = { info };
-`
-    );
-    wstream.end();
 
     /*
         .
         .
         ---------------------------------------------------------route.helper
         */
-    wstream = fs.createWriteStream(`${fileDir}/route.helper.js`);
-    wstream.write(`const dotenv = require("dotenv");
+    wstream = fs.createWriteStream(`${fileDir}/helpers/route.helper.ts`);
+    wstream.write(`/* eslint-disable @typescript-eslint/explicit-function-return-type */
+/* eslint-disable @typescript-eslint/no-misused-promises */
+/* eslint-disable @typescript-eslint/no-extraneous-class */
+import dotenv from 'dotenv'
+import { type Router } from 'express'
 
-dotenv.config();
+import RateLimit from 'express-rate-limit'
+
+let limiter: any
+
+dotenv.config()
+
+function rateLimitHandler (req: any, res: any, windowMs: any): void {
+  res.setHeader('Retry-After', Math.ceil(windowMs / 1000))
+  console.log(\`Rate limit exceeded for ip: \${req.ip}\`)
+  return res
+    .status(429)
+    .send({ message: \`Rate limit exceeded for ip: \${req.ip}\`, code: 429 })
+}
 
 class RouteHelper {
-  static applyRoutes(routes, router) {
+  static initRoutes (routes: any[], router: Router): any {
     for (const route of routes) {
       const { method, path, handler } = route;
-      //   console.log(\`\${process.env.NODE_ENV}\${path}\`);
-      router[method](\`\${process.env.NODE_ENV}\${path}\`, handler);
+      (router as any)[method](\`/\${process.env.NODE_ENV}\${path}\`, handler)
     }
-
-    // eslint-disable-next-line dot-notation
-    router["get"](\`\${process.env.NODE_ENV}/\`, async (req, res) => {
-      res.setHeader("content-type", "text/plain");
+    router.get(\`/\${process.env.NODE_ENV}\`, (req: any, res: any) => {
+      res.setHeader('content-type', 'application/json')
       const report = {
-        message: \`You are welcome to \${process.env.PROJECT}\`,
-        code: 201,
-      };
-      res.status(201).send(report);
-      res.end();
-    });
+        message: 'You are welcome to Acresal',
+        code: 201
+      }
+      res.status(201).send(report)
+    })
+  }
+
+  static getLimiter (): any {
+    return limiter
+  }
+
+  static handleRateLimiter (router: any): any {
+    limiter = RateLimit({
+      windowMs: 15 * 60 * 1000, // 15 minutes
+      max: 100, // limit each IP to 100 requests per windowMs
+      handler (req, res) {
+        console.log('here')
+        rateLimitHandler(req, res, 15 * 60 * 1000)
+      }
+    })
+    router.use(limiter)
   }
 }
 
-module.exports = RouteHelper;
+export default RouteHelper
 `);
-    wstream.end();
-
-    /*
-        .
-        .
-        ---------------------------------------------------------db.helper
-        */
-    wstream = fs.createWriteStream(`${fileDir}/db.helper.js`);
-    wstream.write(
-      `const fs = require("fs");
-const { connection } = require("../config/config");
-const appFunctions = require("./app.helper");
-const Log = require("./console.helper");
-
-class dbhelper {
-  static connection() {
-    return connection;
-  }
-
-
-
-  static async execute(Model) {
-    return new Promise((resolve, _reject) => {
-      connection.query(Model, (_error, results) => {
-        try {
-          if (_error != null) {
-            if (_error.sqlMessage.endsWith("cannot be null")) {
-              let newErr =  _error.sqlMessage.replace(/cannot be null/g, "field can not be empty");
-               newErr =  newErr.replace(/Column /g, "");
-              resolve({"message":newErr,"code":400,"error":"Invalid input"});
-            }
-          }
-          if (results.affectedRows > -1) {
-            resolve({"message":"Success","code":200,"id":results.insertId});
-          } else {
-            resolve("Warning");
-          }
-        } catch (error) {
-          resolve(error);
-        }
-      });
-    });
-  }
-  
-
-  static async columnExist(Table, Col) {
-    return new Promise((resolve, _reject) => {
-      const sql = \`SHOW COLUMNS FROM \${Table} LIKE "\${Col}"\`;
-      connection.query(sql, (_error, results) => {
-        try {
-          if (_error != null) {
-            resolve(_error.sqlMessage);
-          }
-          if (results === undefined || results.length <= 0) {
-            resolve(false);
-          } else {
-            resolve(true);
-          }
-        } catch (error) {
-          resolve(error);
-        }
-      });
-    });
-  }
-
-  static async processSQLFile(fileName) {
-    // Extract SQL queries from files. Assumes no ';' in the fileNames
-    const queries = fs
-      .readFileSync(fileName)
-      .toString()
-      .replace(/(\\r\\n|\\n|\\r)/gm, " ") // remove newlines
-      .replace(/\\s+/g, " ") // excess white space
-      .split(";") // split into all statements
-      .map(Function.prototype.call, String.prototype.trim)
-      .filter((el) => el.length !== 0); // remove any empty ones
-
-    // Execute each SQL query sequentially
-    queries.forEach(async (query) => {
-      await this.runQuery(query);
-    });
-  }
-
-  static async findTable(table, start = 0, limit = 100) {
-    return new Promise((resolve, _reject) => {
-      const sql = \`SELECT * FROM \${table} ORDER BY id DESC LIMIT  \${start}, \${limit}\`;
-
-      console.log(sql);
-      connection.query(sql, (_error, results) => {
-        try {
-          if (results === undefined || results.length === 0) {
-            resolve("");
-          } else {
-            const resultArray = Object.values(
-              JSON.parse(JSON.stringify(results))
-            );
-            connection.query(
-              \`SELECT COUNT(*) AS dcount FROM \${table}\`,
-              (_derror, dresults) => {
-                const dtotal = Object.values(
-                  JSON.parse(JSON.stringify(dresults))
-                );
-                resolve({
-                  total: dtotal[0].dcount,
-                  count: results.length,
-                  content: resultArray,
-                });
-              }
-            );
-          }
-        } catch (err) {
-          console.error(err);
-          resolve("");
-        }
-      });
-    });
-  }
-
-  // -------- Return  the Total num of record in a Table using the field provided
-  static async countrow(col, table, where, val) {
-    return new Promise((resolve, _reject) => {
-      try {
-        const whereArray = appFunctions.sqlOptions(where);
-
-        const sql = \`SELECT \${col} FROM \${table} WHERE \${whereArray}\`;
-  
-        connection.query(sql,val,
-          (_error, results) => {
-            resolve(results.length);
-          }
-        );
-      } catch (err) {
-        console.error(err);
-        resolve(0);
-      }
-    });
-  }
-  // -------- Update the fields in a table with the data provided using 1 field comparison
-  static update(table, set, val, where, place) {
-    return new Promise((resolve, _reject) => {
-      const whereArray = appFunctions.sqlOptions(where);
-      const stm = \`UPDATE \${table} SET \${set}='\${val}' WHERE \${whereArray}\`;
-
-      connection.query(stm, place, (_error, results) => {
-        resolve(results);
-      });
-    });
-  }
-
-  // -------- Delete a record from user table  using 1 field cmparison
-  static async Delete(table, where, val) {
-    return new Promise((resolve, _reject) => {
-      const whereArray = appFunctions.sqlOptions(where);
-      const sql = \`DELETE FROM \${table} WHERE \${whereArray}\`;
-      connection.query(sql, val, (_error, results) => {
-        try {
-          if (_error != null) {
-            resolve(_error.sqlMessage);
-          }
-          if (results.affectedRows > -1) {
-            resolve("Success");
-          } else {
-            resolve("Warning");
-          }
-        } catch (error) {
-          resolve(error);
-        }
-        // done!
-      });
-    });
-  }
-
-  static async find(table, equals, where = ["id"]) {
-    return new Promise((resolve, _reject) => {
-      const whereArray = appFunctions.sqlOptions(where);
-
-      const sql = \`SELECT * FROM \${table} WHERE \${whereArray}\`;
-
-      connection.query(sql, equals, (_error, results) => {
-        try {
-          if (results === undefined || results.length === 0) {
-            resolve("");
-          } else {
-            const resultArray = Object.values(
-              JSON.parse(JSON.stringify(results))
-            ); // --- Remove RowDataPacket
-            const res = resultArray[0];
-            resolve(res);
-          }
-        } catch (err) {
-          console.error(err);
-          resolve("");
-        }
-      });
-    });
-  }
-
-  static async findAll(table, equals, where = ["id"], start = 0, limit = 100) {
-    return new Promise((resolve, _reject) => {
-      const whereArray = appFunctions.sqlOptions(where);
-
-      const sql = \`SELECT * FROM \${table} WHERE \${whereArray} ORDER BY id DESC LIMIT  \${start} , \${limit}\`;
-
-      connection.query(sql, equals, (_error, results) => {
-        try {
-          if (results === undefined || results.length === 0) {
-            resolve("");
-          } else {
-            const resultArray = Object.values(
-              JSON.parse(JSON.stringify(results))
-            ); // --- Remove RowDataPacket
-            connection.query(
-              \`SELECT COUNT(*) AS dcount FROM \${table} WHERE \${whereArray} ORDER BY id\`,
-              equals,
-              (_derror, dresults) => {
-                const dtotal = Object.values(
-                  JSON.parse(JSON.stringify(dresults))
-                );
-                resolve({
-                  total: dtotal[0].dcount,
-                  count: results.length,
-                  content: resultArray,
-                });
-              }
-            );
-          }
-        } catch (err) {
-          console.error(err);
-          resolve("");
-        }
-      });
-    });
-  }
-
-  static async findAllLike(table, equals, where = ["id"]) {
-    return new Promise((resolve, _reject) => {
-      let sql = \`SELECT * FROM \${table} WHERE \${where} LIKE \`;
-      sql += \`"%\${equals}%"\`;
-      connection.query(sql, (_error, results) => {
-        try {
-          if (results === undefined || results.length === 0) {
-            resolve("");
-          } else {
-            const resultArray = Object.values(
-              JSON.parse(JSON.stringify(results))
-            ); // --- Remove RowDataPacket
-            const res = resultArray;
-            resolve(res);
-          }
-        } catch (err) {
-          console.error(err);
-          resolve("");
-        }
-      });
-    });
-  }
-
-  static async selany(col, table, where, equals) {
-    return new Promise((resolve, _reject) => {
-      const sql = \`SELECT \${col} FROM \${table} WHERE \${where}=?\`;
-      connection.query(sql, [equals], (error, results) => {
-        try {
-          if (results === undefined || results.length === 0) {
-            resolve("");
-          } else {
-            const resultArray = Object.values(
-              JSON.parse(JSON.stringify(results))
-            ); // --- Remove RowDataPacket
-            const res = resultArray[0][col];
-            resolve(res);
-          }
-        } catch (err) {
-          resolve("");
-        }
-      });
-    });
-  }
-
-  static async selectlast(col, table, orderby) {
-    return new Promise((resolve, _reject) => {
-      const sql = \`SELECT \${col} FROM \${table} ORDER BY \${orderby} DESC LIMIT 0,1\`;
-      connection.query(sql, (error, results) => {
-        try {
-          if (results === undefined || results.length === 0) {
-            resolve("");
-          } else {
-            const resultArray = Object.values(
-              JSON.parse(JSON.stringify(results))
-            ); // --- Remove RowDataPacket
-            const res = resultArray[0][col];
-            resolve(res);
-          }
-        } catch (err) {
-          resolve("");
-        }
-      });
-    });
-  }
-
-  static async runQuery(sql) {
-    return new Promise((resolve, _reject) => {
-      try {
-        connection.query(sql, (_error, results) => {
-          if (results === undefined || results.length === 0) {
-            resolve("");
-          } else {
-            const resultArray = Object.values(
-              JSON.parse(JSON.stringify(results))
-            ); // --- Remove RowDataPacket
-            if (resultArray === undefined || resultArray.length === 0) {
-              resolve("");
-            } else {
-              resolve(resultArray);
-            }
-          }
-        });
-      } catch (err) {
-        console.error(err);
-        resolve("");
-      }
-    });
-  }
-}
-
-module.exports = dbhelper;
-`
-    );
     wstream.end();
   }
 
@@ -1533,6 +1050,8 @@ module.exports = dbhelper;
     "dotenv": "^16.0.1",
     "ejs": "^3.1.7",
     "express": "^4.18.1",
+    "formidable": "^3.5.0",
+    "joi": "^17.9.2",
     "express-mysql-session": "^2.1.7",
     "express-sesssion": "^1.15.5",
     "joi": "^17.9.2",
@@ -1567,6 +1086,8 @@ module.exports = dbhelper;
     wstream = fs.createWriteStream(`${fileDir}/index.js`);
     wstream.write(`const express = require("express");
 
+const path = require("path");
+
 const dotenv = require("dotenv");
 
 const app = express();
@@ -1587,6 +1108,11 @@ const bodyParseroptions = {
 };
 
 app.use(bodyParser.raw(bodyParseroptions));
+
+app.use(
+  \`\${process.env.NODE_ENV}/public\`,
+  express.static(path.join(__dirname, "public"))
+);
 
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
@@ -1623,8 +1149,8 @@ app.listen(port, () => {
     this.createHelpers();
     this.createModel();
     this.createService();
-    this.createStatic();
-    this.createPostmanCalls();
+    // this.createStatic();
+    // this.createPostmanCalls();
   }
 }
 
