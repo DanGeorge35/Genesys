@@ -1110,17 +1110,19 @@ export default RouteHelper
     wstream.write(envContent.toString());
     wstream.end();
 
-    let vscode = fs.readFileSync(__dirname + "/static/.vscode/extensions.json");
+    let vscode = fs.readFileSync(
+      __dirname + "/statics/.vscode/extensions.json"
+    );
     wstream = fs.createWriteStream(`${fileDir}/.vscode/extensions.json`);
     wstream.write(vscode.toString());
     wstream.end();
 
-    vscode = fs.readFileSync(__dirname + "/static/.vscode/launch.json");
+    vscode = fs.readFileSync(__dirname + "/statics/.vscode/launch.json");
     wstream = fs.createWriteStream(`${fileDir}/.vscode/launch.json`);
     wstream.write(vscode.toString());
     wstream.end();
 
-    vscode = fs.readFileSync(__dirname + "/static/.vscode/settings.json");
+    vscode = fs.readFileSync(__dirname + "/statics/.vscode/settings.json");
     wstream = fs.createWriteStream(`${fileDir}/.vscode/settings.json`);
     wstream.write(vscode.toString());
     wstream.end();
