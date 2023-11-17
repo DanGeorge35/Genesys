@@ -1,4 +1,5 @@
 const fs = require("fs");
+
 const DbHelper = require("./dbhandler");
 require("dotenv").config();
 
@@ -1032,42 +1033,73 @@ export default RouteHelper
   "name": "${process.env.PROJECT}",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "start": "node index.js",
-    "dev": "nodemon index.js"
+ "scripts": {
+    "start": "node ./dist/index.js",
+    "test": "echo \'Error: no test specified\' && exit 1",
+    "tsc": "tsc",
+    "build": "tsc",
+    "watch": "tsc && nodemon ./dist/index.js",
+    "debug": "ts-node ./src/index.ts",
+    "lint": "eslint . --fix",
+    "format": "prettier --write ."
   },
-  "keywords": [
-    "${process.env.PROJECT}"
-  ],
-  "author": "Dan George",
+  "keywords": [],
+  "author": "",
   "license": "ISC",
-  "dependencies": {
-    "axios": "^1.2.2",
-    "bcrypt": "^5.1.0",
-    "body-parser": "^1.19.2",
-    "chalk": "^5.2.0",
-    "date-and-time": "^2.3.1",
-    "dotenv": "^16.0.1",
-    "ejs": "^3.1.7",
-    "express": "^4.18.1",
-    "formidable": "^3.5.0",
-    "joi": "^17.9.2",
-    "express-mysql-session": "^2.1.7",
-    "express-sesssion": "^1.15.5",
-    "joi": "^17.9.2",
-    "jsonwebtoken": "^8.5.1",
-    "multer": "^1.4.5-lts.1",
-    "mysql": "^2.18.1",
-    "nodemailer": "^6.7.3",
-    "nodemailer-smtp-transport": "^2.7.4",
-    "nodemon": "^2.0.16",
-    "socket.io": "^4.1.2",
-    "sql-escape": "^1.0.1"
-  },
   "devDependencies": {
-    "eslint": "^8.31.0",
+    "@types/bcrypt": "^5.0.1",
+    "@types/bcryptjs": "^2.4.2",
+    "@types/cookie-parser": "^1.4.5",
+    "@types/cors": "^2.8.13",
+    "@types/csurf": "^1.11.4",
+    "@types/jsonwebtoken": "^9.0.2",
+    "@types/morgan": "^1.9.4",
+    "@types/multer": "^1.4.7",
+    "@typescript-eslint/eslint-plugin": "^6.10.0",
+    "@typescript-eslint/parser": "^6.10.0",
+    "eslint": "^8.53.0",
     "eslint-config-airbnb-base": "^15.0.0",
-    "eslint-plugin-import": "^2.26.0"
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-config-standard-with-typescript": "^39.1.1",
+    "eslint-plugin-import": "^2.29.0",
+    "eslint-plugin-n": "^16.3.0",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-prettier": "^5.0.1",
+    "eslint-plugin-promise": "^6.1.1",
+    "morgan": "^1.10.0",
+    "nodemon": "^3.0.1",
+    "prettier": "^3.0.3",
+    "tsc-watch": "^6.0.0",
+    "typescript": "^5.2.2"
+  },
+  "dependencies": {
+    "@types/express": "^4.17.17",
+    "@types/formidable": "^3.4.4",
+    "@types/node": "^18.17.1",
+    "axios": "^1.5.1",
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^2.4.3",
+    "colors": "^1.4.0",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "csurf": "^1.11.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-async-handler": "^1.2.0",
+    "express-rate-limit": "^7.1.3",
+    "formidable": "^3.5.1",
+    "helmet": "^6.2.0",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.1",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.6.2",
+    "nodemailer": "^6.9.5",
+    "sequelize": "^6.33.0",
+    "shp-write": "^0.3.2",
+    "sql-escape": "^1.0.1",
+    "ts-node": "^10.9.1",
+    "winston": "^3.10.0"
   }
 }
 `);
@@ -1078,69 +1110,110 @@ export default RouteHelper
     wstream.write(envContent.toString());
     wstream.end();
 
-    let configContent = fs.readFileSync(__dirname + "/config.js");
-    wstream = fs.createWriteStream(`${fileDir}/config/config.js`);
+    let vscode = fs.readFileSync(__dirname + "/static/.vscode/extensions.json");
+    wstream = fs.createWriteStream(`${fileDir}/.vscode/extensions.json`);
+    wstream.write(vscode.toString());
+    wstream.end();
+
+    vscode = fs.readFileSync(__dirname + "/static/.vscode/launch.json");
+    wstream = fs.createWriteStream(`${fileDir}/.vscode/launch.json`);
+    wstream.write(vscode.toString());
+    wstream.end();
+
+    vscode = fs.readFileSync(__dirname + "/static/.vscode/settings.json");
+    wstream = fs.createWriteStream(`${fileDir}/.vscode/settings.json`);
+    wstream.write(vscode.toString());
+    wstream.end();
+
+    let eslintIgn = fs.readFileSync(__dirname + "/statics/.eslintignore");
+    wstream = fs.createWriteStream(`${fileDir}/.eslintignore`);
+    wstream.write(eslintIgn.toString());
+    wstream.end();
+
+    let eslintrc = fs.readFileSync(__dirname + "/statics/.eslintrc.json");
+    wstream = fs.createWriteStream(`${fileDir}/.eslintrc.json`);
+    wstream.write(eslintrc.toString());
+    wstream.end();
+
+    let tsconf = fs.readFileSync(__dirname + "/statics/tsconfig.json");
+    wstream = fs.createWriteStream(`${fileDir}/tsconfig.json`);
+    wstream.write(tsconf.toString());
+    wstream.end();
+
+    let prett = fs.readFileSync(__dirname + "/statics/.prettierrc");
+    wstream = fs.createWriteStream(`${fileDir}/.prettierrc`);
+    wstream.write(prett.toString());
+    wstream.end();
+
+    let messagesConst = fs.readFileSync(
+      __dirname + "/statics/messages/ErrorMessage.ts"
+    );
+    wstream = fs.createWriteStream(`${fileDir}/src/messages/ErrorMessage.ts`);
+    wstream.write(messagesConst.toString());
+    wstream.end();
+
+    let middlewareConst = fs.readFileSync(
+      __dirname + "/statics/middleware/error.ts"
+    );
+    wstream = fs.createWriteStream(`${fileDir}/src/middleware/error.ts`);
+    wstream.write(middlewareConst.toString());
+    wstream.end();
+
+    let configContent = fs.readFileSync(__dirname + "/statics/db.ts");
+    wstream = fs.createWriteStream(`${fileDir}/src/config/db.ts`);
     wstream.write(configContent.toString());
     wstream.end();
 
     wstream = fs.createWriteStream(`${fileDir}/index.js`);
-    wstream.write(`const express = require("express");
+    wstream.write(`import express from 'express'
+import dotenv from 'dotenv'
+import path from 'path'
+// import csrf from 'csurf'
+import cookieParser from 'cookie-parser'
+import morgan from 'morgan'
+import cors from 'cors'
+import helmet from 'helmet'
+import errorHandler from './middleware/error'
+import endpoints from './services/'
+import RouteHelper from './libs/helpers/route.helper'
 
-const path = require("path");
+// const app: express.Application = express();
+const app = express()
 
-const dotenv = require("dotenv");
+dotenv.config()
 
-const app = express();
-const bodyParser = require("body-parser");
-
-dotenv.config();
-
-const endpoints = require("./services");
-const RouteHelper = require("./helpers/route.helper");
-
-app.use(express.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-const bodyParseroptions = {
-  inflate: true,
-  limit: "100kb",
-  type: "application/octet-stream",
-};
-
-app.use(bodyParser.raw(bodyParseroptions));
-
+const corsOptions = {
+  origin: '*',
+  methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+  credentials: true // Enable cookies or other credentials
+}
+// MiddleWare
+app.use(helmet()) // Security first middleware
+app.use(express.json()) // for parsing application/json
+app.use(express.urlencoded({ extended: true })) // for parsing application/x-www-form-urlencoded
+app.use(cors(corsOptions))
+app.use(cookieParser())
+if (process.env.NODE_ENV === 'development') {
+  app.use(morgan('dev'))
+}
 app.use(
-  \`\${process.env.NODE_ENV}/public\`,
-  express.static(path.join(__dirname, "public"))
-);
+    \`/\${process.env.NODE_ENV}/public\`,
+    express.static(path.join(__dirname, '../public'))
+)
 
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-  );
+app.use(errorHandler)
 
-  if (req.method === "OPTIONS") {
-    res.header("Access-Control-Allow-Methods", "PUT, POST, PATCH, DELETE, GET");
-    return res.status(200).json({});
-  }
-
-  next();
-});
-
-/* API Endpoints  */
 try {
-  RouteHelper.applyRoutes(endpoints, app);
+  RouteHelper.initRoutes(endpoints, app)
 } catch (error) {
-  console.log(error);
+  console.error(error)
 }
 
-const port = process.env.PORT;
+const port = process.env.PORT
 
 app.listen(port, () => {
-  console.log(\`Socket.IO server running at http://localhost:\${port}/\`);
-});
+  console.log(\`Server is running on  http://localhost:\${port}\`)
+})
 `);
     wstream.end();
   }
@@ -1149,7 +1222,7 @@ app.listen(port, () => {
     this.createHelpers();
     this.createModel();
     this.createService();
-    // this.createStatic();
+    this.createStatic();
     // this.createPostmanCalls();
   }
 }

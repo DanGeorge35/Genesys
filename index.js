@@ -2,6 +2,7 @@
 /* eslint-disable comma-dangle */
 /* eslint-disable consistent-return */
 const https = require("https");
+
 const fs = require("fs");
 
 // const chalk = require('chalk');
@@ -32,6 +33,26 @@ function generate() {
   if (!fs.existsSync(GenDir)) {
     fs.mkdir(GenDir, { recursive: true }, (err) => {
       let fileDir = `${__dirname}/${GenDir}/public`;
+      if (!fs.existsSync(fileDir)) {
+        fs.mkdir(fileDir, { recursive: true }, (err) => {
+          if (err) throw err;
+        });
+      }
+
+      fileDir = `${__dirname}/${GenDir}/.vscode`;
+      if (!fs.existsSync(fileDir)) {
+        fs.mkdir(fileDir, { recursive: true }, (err) => {
+          if (err) throw err;
+        });
+      }
+
+      fileDir = `${__dirname}/${GenDir}/src/messages`;
+      if (!fs.existsSync(fileDir)) {
+        fs.mkdir(fileDir, { recursive: true }, (err) => {
+          if (err) throw err;
+        });
+      }
+      fileDir = `${__dirname}/${GenDir}/src/middleware`;
       if (!fs.existsSync(fileDir)) {
         fs.mkdir(fileDir, { recursive: true }, (err) => {
           if (err) throw err;
